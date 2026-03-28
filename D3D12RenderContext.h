@@ -38,6 +38,10 @@ public:
         return m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
     }
     UINT GetRtvDescriptorSize() const { return m_rtvDescriptorSize; };
+    D3D12_CPU_DESCRIPTOR_HANDLE GetDsvHeapStart() const
+    {
+        return m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+	}
 
 private:
     ComPtr<IDXGIFactory4> m_factory;
@@ -56,7 +60,10 @@ private:
     ComPtr<ID3D12CommandQueue> m_commandQueue;
     ComPtr<IDXGISwapChain3> m_swapChain;
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
+    ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
+    ComPtr<ID3D12Resource> m_depthBuffer;
     UINT m_rtvDescriptorSize;
+    UINT m_dsvDescriptorSize;
     ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
     ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
     ComPtr<ID3D12GraphicsCommandList> m_commandList;

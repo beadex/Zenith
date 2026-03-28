@@ -77,9 +77,9 @@ void D3D12RenderContext::CreateDevice(bool useWarp)
 
 void D3D12RenderContext::CreateResources(HWND hwnd)
 {
+	const DXGI_SAMPLE_DESC sampleDesc = { 1, 0 };
 	// Create swap chain
 	{
-		const DXGI_SAMPLE_DESC sampleDesc = { 1, 0 };
 
 		DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
 		swapChainDesc.BufferCount = FrameCount;
@@ -105,7 +105,7 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 		ThrowIfFailed(swapChain.As(&m_swapChain));
 		m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 	}
-	
+
 	// Create descriptor heap for render target views (RTVs)
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
@@ -115,6 +115,39 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 		ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
 
 		m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+		D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
+		dsvHeapDesc.NumDescriptors = 1;
+		dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+		dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+		ThrowIfFailed(m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_dsvHeap)));
+
+		D3D12_RESOURCE_DESC depthDesc = {};
+		depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		depthDesc.Width = m_width;
+		depthDesc.Height = m_height;
+		depthDesc.DepthOrArraySize = 1;
+		depthDesc.MipLevels = 1;
+		depthDesc.Format = DXGI_FORMAT_D32_FLOAT;
+		depthDesc.SampleDesc = sampleDesc;
+		depthDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+		D3D12_CLEAR_VALUE depthClear = {};
+		depthClear.Format = DXGI_FORMAT_D32_FLOAT;
+		depthClear.DepthStencil.Depth = 1.0f;
+
+		ThrowIfFailed(m_device->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+			D3D12_HEAP_FLAG_NONE,
+			&depthDesc,
+			D3D12_RESOURCE_STATE_DEPTH_WRITE,
+			&depthClear,
+			IID_PPV_ARGS(&m_depthBuffer)
+		));
+
+		m_device->CreateDepthStencilView(m_depthBuffer.Get(), nullptr, m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+
+		m_dsvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 	}
 
 	// Create render target views (RTVs) for each frame in the swap chain
@@ -133,7 +166,7 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 
 	// Create command allocator and command list
 	{
-		
+
 		ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 		m_commandList->Close();
 	}

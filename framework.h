@@ -13,8 +13,15 @@
 
 #include <d3dx12.h>
 
+// Assimp Header Files
+#include <assimp/Importer.hpp>      // C++ importer interface
+#include <assimp/scene.h>           // Output data structure
+#include <assimp/postprocess.h>     // Post processing flags
+
 // C RunTime Header Files
+#include <iostream>
 #include <string>
+#include <vector>
 #include <wrl.h>
 #include <shellapi.h>
 #include <cmath>
