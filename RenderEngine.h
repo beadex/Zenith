@@ -16,7 +16,7 @@ public:
 
 private:
     // Here we will load the pipeline state, root signature, and any assets (like shaders, textures, etc.)
-    
+
     // Pipeline objects
     CD3DX12_VIEWPORT m_viewport;
     CD3DX12_RECT m_scissorRect;
@@ -26,15 +26,18 @@ private:
 
     std::unique_ptr<Model> m_model;
 
-    struct SceneConstantBuffer {
-        XMFLOAT4X4 mvp;
-        float padding[48];
+    struct SceneDataConstantBuffer
+    {
+        XMFLOAT4X4 model;
+        XMFLOAT4X4 view;
+        XMFLOAT4X4 projection;
+        XMFLOAT4X4 normalMatrix;
     };
-    static_assert((sizeof(SceneConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
+    static_assert((sizeof(SceneDataConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
 
-    ComPtr<ID3D12Resource> m_constantBuffer;
-    SceneConstantBuffer m_cbData;
-    UINT8* m_pCbvDataBegin;
+    ComPtr<ID3D12Resource> m_sceneDataConstantBuffer;
+    SceneDataConstantBuffer m_sceneDataCbData;
+    UINT8* m_pSceneDataCbvDataBegin;
 
     // Camera props
     XMVECTOR m_cameraPos;
@@ -43,5 +46,5 @@ private:
 
     void CreateRootSignature();
     void CreatePipelineState();
-    void CreateConstantBuffer();
+    void CreateSceneDataConstantBuffer();
 };

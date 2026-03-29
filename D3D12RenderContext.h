@@ -8,6 +8,7 @@ class D3D12RenderContext
 public:
     // FrameCount thường là 2 cho Double Buffering hoặc 3 cho Triple Buffering
     static const UINT FrameCount = 2;
+    static const UINT MaxTextures = 1024;
 
     D3D12RenderContext(UINT width, UINT height);
     ~D3D12RenderContext();
@@ -44,10 +45,18 @@ public:
         return m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
     }
     UINT GetRtvDescriptorSize() const { return m_rtvDescriptorSize; };
+
     D3D12_CPU_DESCRIPTOR_HANDLE GetDsvHeapStart() const
     {
         return m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
 	}
+	UINT GetDsvDescriptorSize() const { return m_dsvDescriptorSize; };
+
+    D3D12_CPU_DESCRIPTOR_HANDLE GetCbvSrvHeapStart() const
+    {
+        return m_cbvSrvHeap->GetCPUDescriptorHandleForHeapStart();
+	}
+	UINT GetCbvSrvDescriptorSize() const { return m_cbvSrvDescriptorSize; };
 
 private:
     ComPtr<IDXGIFactory4> m_factory;
@@ -67,9 +76,11 @@ private:
     ComPtr<IDXGISwapChain3> m_swapChain;
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
-    ComPtr<ID3D12Resource> m_depthBuffer;
+    ComPtr<ID3D12DescriptorHeap> m_cbvSrvHeap;
     UINT m_rtvDescriptorSize;
     UINT m_dsvDescriptorSize;
+	UINT m_cbvSrvDescriptorSize;
+    ComPtr<ID3D12Resource> m_depthBuffer;
     ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
     ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
     ComPtr<ID3D12GraphicsCommandList> m_commandList;

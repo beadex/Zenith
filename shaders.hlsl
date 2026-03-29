@@ -1,33 +1,86 @@
-// Constant Buffer
+// ============================================================
+// Constant Buffers
+// ============================================================
+
 struct SceneData
 {
-    float4x4 mvp;
+    float4x4 model;
+    float4x4 view;
+    float4x4 projection;
+    float4x4 normalMatrix;
 };
-ConstantBuffer<SceneData> cb : register(b0);
+ConstantBuffer<SceneData> sceneData : register(b0);
+
+struct MaterialData
+{
+    uint diffuseStartIndex;
+    uint specularStartIndex;
+    uint numDiffuse;
+    uint numSpecular;
+};
+ConstantBuffer<MaterialData> materialData : register(b1);
+
+// ============================================================
+// Resources
+// ============================================================
+
+Texture2D gTextures[] : register(t0, space0);
+SamplerState g_sampler : register(s0);
+
+// ============================================================
+// Vertex / Pixel shader structs
+// ============================================================
 
 struct VSInput
 {
-    float3 pos : POSITION;
-    float3 norm : NORMAL;
+    float3 position : POSITION;
+    float3 normal : NORMAL;
     float2 uv : TEXCOORD;
 };
 
 struct PSInput
 {
-    float4 pos : SV_POSITION;
-    float3 color : COLOR;
+    float4 position : SV_POSITION;
+    float3 normal : NORMAL;
+    float3 worldPos : POSITION;
+    float2 uv : TEXCOORD;
 };
+
+// ============================================================
+// Vertex Shader
+// ============================================================
 
 PSInput VSMain(VSInput input)
 {
     PSInput vout;
-    vout.pos = mul(float4(input.pos, 1.0f), cb.mvp);
-    // Debug bằng cách lấy Normal làm màu
-    vout.color = input.norm * 0.5f + 0.5f;
+
+    float4 worldPos = mul(float4(input.position, 1.0f), sceneData.model);
+    vout.worldPos = worldPos.xyz;
+    vout.normal = normalize(mul(input.normal, (float3x3) sceneData.normalMatrix));
+    vout.position = mul(mul(worldPos, sceneData.view), sceneData.projection);
+    vout.uv = input.uv;
+
     return vout;
 }
 
+// ============================================================
+// Pixel Shader
+// ============================================================
+
 float4 PSMain(PSInput input) : SV_TARGET
 {
-    return float4(input.color, 1.0f);
+    float3 albedo = float3(0.0f, 0.0f, 0.0f);
+
+    if (materialData.numDiffuse > 0)
+    {
+        albedo = gTextures[materialData.diffuseStartIndex].Sample(g_sampler, input.uv).rgb;
+    }
+
+    // Fallback: nếu không có diffuse map, dùng màu trắng
+    if (materialData.numDiffuse == 0)
+    {
+        albedo = input.normal * 0.5f + 0.5f;
+    }
+
+    return float4(albedo, 1.0f);
 }

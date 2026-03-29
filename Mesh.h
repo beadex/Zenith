@@ -10,9 +10,19 @@ struct Vertex
 	XMFLOAT2 TexCoord;
 };
 
+struct MaterialData
+{
+	UINT diffuseStartIndex = 0;
+	UINT specularStartIndex = 0;
+	UINT numDiffuse = 0;
+	UINT numSpecular = 0;
+};
+
 struct Texture {
 	std::string type; // For example: "texture_diffuse", "texture_specular"
-	std::string path; // File path to the texture image
+	std::string path; // File path or embedded key
+	ScratchImage image;
+	UINT heapIndex = UINT_MAX;
 };
 
 class Mesh
@@ -26,17 +36,29 @@ public:
 
 	// Call this after EndUpload() to free staging memory and CPU-side data
 	void ReleaseUploadBuffers();
+
+	std::vector<Texture>& GetTextures() { return m_textures; }
+
+	D3D12_GPU_VIRTUAL_ADDRESS GetMaterialConstantBufferAddress() const
+	{
+		return m_materialConstantBuffer->GetGPUVirtualAddress();
+	}
+
+	void SetMaterialData(const MaterialData& data);
 private:
 	// Resource on CPU
 	std::vector<Vertex> m_vertices;
 	std::vector<UINT> m_indices;
 	std::vector<Texture> m_textures;
+	MaterialData m_materialData;
 
 	// Resource on GPU
 	ComPtr<ID3D12Resource> m_vertexBuffer;
 	ComPtr<ID3D12Resource> m_indexBuffer;
+	ComPtr<ID3D12Resource> m_materialConstantBuffer;
 	ComPtr<ID3D12Resource> m_vertexUploadBuffer;
 	ComPtr<ID3D12Resource> m_indexUploadBuffer;
+	ComPtr<ID3D12Resource> m_materialUploadConstantBuffer;
 
 	// Buffer views
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
@@ -45,6 +67,9 @@ private:
 	UINT m_vertexCount;
 	UINT m_indexCount;
 
+	UINT8* m_mappedMaterialData = nullptr;
+
 	// Helper function to create vertex and index buffers on the GPU
-	void CreateBuffers(ID3D12Device* device, ID3D12GraphicsCommandList* commandList);
+	void CreateVertexAndIndexBuffers(ID3D12Device* device, ID3D12GraphicsCommandList* commandList);
+	void CreateMaterialConstantBuffer(ID3D12Device* device);
 };
