@@ -15,6 +15,12 @@ public:
 	// Intialize the D3D12 context with the given window handle and whether to use WARP (software rendering)
     void Initialize(HWND hwnd, bool useWarp);
 
+	// Begin the upload process for resources (Reset command allocator, command list, etc.)
+    void BeginUpload();
+
+	// End the upload process and execute the command list to upload resources to the GPU (Close command list, execute, wait for GPU, etc.)
+	void EndUpload();
+
 	// Prepare command list for rendering (Reset command allocator, command list, set render target, etc.)
     void Prepare();
 

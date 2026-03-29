@@ -203,11 +203,6 @@
       <Outputs>$(OutDir)\%(Identity)</Outputs>
       <TreatOutputAsContent>true</TreatOutputAsContent>
     </CustomBuild>
-    <PostBuildEvent>
-      <Command>if not exist "$(OutDir)Assets" mkdir "$(OutDir)Assets"
-robocopy "$(ProjectDir)Assets" "$(OutDir)Assets" /E /IS /IT /NP
-if %errorlevel% leq 7 exit 0 else exit %errorlevel%</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -262,11 +257,6 @@ if %errorlevel% leq 7 exit 0 else exit %errorlevel%</Command>
       <Outputs>$(OutDir)\%(Identity)</Outputs>
       <TreatOutputAsContent>true</TreatOutputAsContent>
     </CustomBuild>
-    <PostBuildEvent>
-      <Command>if not exist "$(OutDir)Assets" mkdir "$(OutDir)Assets"
-robocopy "$(ProjectDir)Assets" "$(OutDir)Assets" /E /IS /IT /NP
-if %errorlevel% leq 7 exit 0 else exit %errorlevel%</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="D3D12Application.h" />

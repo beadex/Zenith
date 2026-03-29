@@ -1,8 +1,11 @@
 #include "pch.h"
 #include "Model.h"
 
-Model::Model(ID3D12Device* device, const std::string& path) :
-	m_device(device)
+using namespace DirectX;
+
+Model::Model(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
+	m_device(device),
+	m_commandList(commandList)
 {
 	LoadModel(path);
 }
@@ -22,7 +25,12 @@ void Model::LoadModel(const std::string& path)
 	Assimp::Importer importer;
 
 	// Read file with optimization flags: Triangulate, FlipUVs
-	const aiScene* scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_FlipUVs);
+	const aiScene* scene = importer.ReadFile(path,
+		aiProcess_Triangulate |
+		aiProcess_FlipUVs |
+		aiProcess_PreTransformVertices |   // Bakes all node transforms into vertex data
+		aiProcess_JoinIdenticalVertices |  // Merges duplicate verts (reduces VRAM)
+		aiProcess_GenSmoothNormals);       // Ensures normals exist);
 
 	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode)
 	{
@@ -64,27 +72,36 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		Vertex vertex;
 
 		// Process vertex positions
-		vertex.Position.x = mesh->mVertices[i].x;
-		vertex.Position.y = mesh->mVertices[i].y;
-		vertex.Position.z = mesh->mVertices[i].z;
+		XMFLOAT3 vector;
+
+		vector.x = mesh->mVertices[i].x;
+		vector.y = mesh->mVertices[i].y;
+		vector.z = mesh->mVertices[i].z;
+
+		vertex.Position = vector;
 
 		// Process vertex normals
 		if (mesh->HasNormals())
 		{
-			vertex.Normal.x = mesh->mNormals[i].x;
-			vertex.Normal.y = mesh->mNormals[i].y;
-			vertex.Normal.z = mesh->mNormals[i].z;
+			vector.x = mesh->mNormals[i].x;
+			vector.y = mesh->mNormals[i].y;
+			vector.z = mesh->mNormals[i].z;
+
+			vertex.Normal = vector;
 		}
 
 		// Process texture coordinates (only the first set)
 		if (mesh->mTextureCoords[0])
 		{
-			vertex.TexCoord.x = mesh->mTextureCoords[0][i].x;
-			vertex.TexCoord.y = mesh->mTextureCoords[0][i].y;
+			XMFLOAT2 vec;
+			vec.x = mesh->mTextureCoords[0][i].x;
+			vec.y = mesh->mTextureCoords[0][i].y;
+
+			vertex.TexCoord = vec;
 		}
 		else
 		{
-			vertex.TexCoord = DirectX::XMFLOAT2(0.0f, 0.0f);
+			vertex.TexCoord = XMFLOAT2(0.0f, 0.0f);
 		}
 
 		vertices.push_back(vertex);
@@ -110,7 +127,7 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
 	}
 
-	return Mesh(m_device, vertices, indices, textures);
+	return Mesh(m_device, m_commandList, vertices, indices, textures);
 }
 
 std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType type, const std::string& typeName)

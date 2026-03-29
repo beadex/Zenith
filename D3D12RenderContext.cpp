@@ -27,6 +27,20 @@ void D3D12RenderContext::Initialize(HWND hwnd, bool useWarp)
 	CreateResources(hwnd);
 }
 
+void D3D12RenderContext::BeginUpload()
+{
+	ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
+	ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr));
+}
+
+void D3D12RenderContext::EndUpload()
+{
+	ThrowIfFailed(m_commandList->Close());
+	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
+	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+	WaitForGpu(); // Stalls CPU until GPU finishes the copy
+}
+
 void D3D12RenderContext::CreateDevice(bool useWarp)
 {
 	// Enable the D3D12 debug layer if in debug mode
@@ -80,7 +94,6 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 	const DXGI_SAMPLE_DESC sampleDesc = { 1, 0 };
 	// Create swap chain
 	{
-
 		DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
 		swapChainDesc.BufferCount = FrameCount;
 		swapChainDesc.Width = m_width;

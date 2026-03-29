@@ -19,7 +19,7 @@ class Mesh
 {
 public:
 	// Constructor to initialize the mesh with vertices, indices, and textures
-	Mesh(ID3D12Device* device, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures);
+	Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures);
 
 	// Draw the mesh using the provided command list
 	void Draw(ID3D12GraphicsCommandList* commandList);
@@ -32,6 +32,8 @@ private:
 	// Resource on GPU
 	ComPtr<ID3D12Resource> m_vertexBuffer;
 	ComPtr<ID3D12Resource> m_indexBuffer;
+	ComPtr<ID3D12Resource> m_vertexUploadBuffer;
+	ComPtr<ID3D12Resource> m_indexUploadBuffer;
 
 	// Buffer views
 	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
@@ -41,5 +43,5 @@ private:
 	UINT m_indexCount;
 
 	// Helper function to create vertex and index buffers on the GPU
-	void CreateBuffers(ID3D12Device* device);
+	void CreateBuffers(ID3D12Device* device, ID3D12GraphicsCommandList* commandList);
 };

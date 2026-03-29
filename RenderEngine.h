@@ -27,12 +27,19 @@ private:
     std::unique_ptr<Model> m_model;
 
     struct SceneConstantBuffer {
-        XMMATRIX mvp;
+        XMFLOAT4X4 mvp;
+        float padding[48];
     };
+    static_assert((sizeof(SceneConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
 
     ComPtr<ID3D12Resource> m_constantBuffer;
     SceneConstantBuffer m_cbData;
     UINT8* m_pCbvDataBegin;
+
+    // Camera props
+    XMVECTOR m_cameraPos;
+    XMVECTOR m_cameraFront;
+    XMVECTOR m_cameraUp;
 
     void CreateRootSignature();
     void CreatePipelineState();
