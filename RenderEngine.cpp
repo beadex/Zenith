@@ -33,6 +33,9 @@ void ZenithRenderEngine::OnInit()
 	m_model = std::make_unique<Model>(device, commandList, "Assets/Models/cnek.3ds");
 	m_renderContext->EndUpload();
 
+	// GPU is done with the upload — release staging buffers and CPU data immediately
+	m_model->ReleaseUploadBuffers();
+
 	CreateConstantBuffer();
 }
 
@@ -97,6 +100,9 @@ void ZenithRenderEngine::CreatePipelineState()
 	psoDesc.DepthStencilState.StencilEnable = FALSE;
 
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)));
+
+	delete[] pVertexShaderData;
+	delete[] pPixelShaderData;
 }
 
 void ZenithRenderEngine::CreateConstantBuffer()

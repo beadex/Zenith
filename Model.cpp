@@ -51,7 +51,7 @@ void Model::ProcessNode(aiNode* node, const aiScene* scene)
 	for (UINT i = 0; i < node->mNumMeshes; i++)
 	{
 		aiMesh* mesh = scene->mMeshes[node->mMeshes[i]];
-		m_meshes.push_back(ProcessMesh(mesh, scene));
+		m_meshes.emplace_back(std::move(ProcessMesh(mesh, scene)));
 	}
 
 	// 2. Then do the same for each of its children
@@ -156,4 +156,8 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 	return textures;
 }
 
-
+void Model::ReleaseUploadBuffers()
+{
+	for (auto& mesh : m_meshes)
+		mesh.ReleaseUploadBuffers();
+}

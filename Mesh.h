@@ -23,6 +23,9 @@ public:
 
 	// Draw the mesh using the provided command list
 	void Draw(ID3D12GraphicsCommandList* commandList);
+
+	// Call this after EndUpload() to free staging memory and CPU-side data
+	void ReleaseUploadBuffers();
 private:
 	// Resource on CPU
 	std::vector<Vertex> m_vertices;

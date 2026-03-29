@@ -93,3 +93,18 @@ void Mesh::CreateBuffers(ID3D12Device* device, ID3D12GraphicsCommandList* comman
 	m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;  // Bug 3 fix: was R16_UINT
 	m_indexBufferView.SizeInBytes = indexBufferSize;
 }
+
+void Mesh::ReleaseUploadBuffers()
+{
+	// Release GPU upload staging buffers — safe to call after EndUpload()/WaitForGpu()
+	m_vertexUploadBuffer.Reset();
+	m_indexUploadBuffer.Reset();
+
+	// Free CPU-side data — no longer needed after GPU copy
+	m_vertices.clear();
+	m_vertices.shrink_to_fit();
+	m_indices.clear();
+	m_indices.shrink_to_fit();
+	m_textures.clear();
+	m_textures.shrink_to_fit();
+}

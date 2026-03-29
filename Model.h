@@ -11,6 +11,7 @@ public:
 	// Draw the model using the provided command list
 	void Draw(ID3D12GraphicsCommandList* commandList);
 
+	void ReleaseUploadBuffers();
 private:
 	std::vector<Mesh> m_meshes;
 	std::string m_directory;
