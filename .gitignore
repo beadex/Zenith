@@ -429,3 +429,6 @@ FodyWeavers.xsd
 
 # vcpkg
 vcpkg_installed
+
+# Exclude model file
+!Assets/**/*.obj

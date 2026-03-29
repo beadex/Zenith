@@ -30,7 +30,7 @@ void ZenithRenderEngine::OnInit()
 
 	m_renderContext->BeginUpload();
 	auto commandList = m_renderContext->GetCommandList();
-	m_model = std::make_unique<Model>(device, commandList, "Assets/Models/cnek.3ds");
+	m_model = std::make_unique<Model>(device, commandList, "Assets/Models/Zuccarello.obj");
 	m_renderContext->EndUpload();
 
 	// GPU is done with the upload — release staging buffers and CPU data immediately
