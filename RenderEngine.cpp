@@ -289,11 +289,12 @@ void ZenithRenderEngine::CreateSceneDataConstantBuffer()
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
 }
 
-void ZenithRenderEngine::CreateGridVertexBuffer(const XMFLOAT3& center, float radius, float gridY)
+void ZenithRenderEngine::CreateGridVertexBuffer(float radius)
 {
 	constexpr int halfLineCount = 10;
 	const float spacing = (std::max)(1.0f, ceilf((std::max)(radius, 1.0f) / static_cast<float>(halfLineCount)));
 	const float extent = static_cast<float>(halfLineCount) * spacing;
+	constexpr float gridY = 0.0f;
 	const XMFLOAT3 minorColor(0.25f, 0.25f, 0.25f);
 	const XMFLOAT3 xAxisColor(0.55f, 0.20f, 0.20f);
 	const XMFLOAT3 zAxisColor(0.20f, 0.35f, 0.60f);
@@ -305,16 +306,16 @@ void ZenithRenderEngine::CreateGridVertexBuffer(const XMFLOAT3& center, float ra
 	{
 		const float offset = static_cast<float>(i) * spacing;
 		const XMFLOAT3 lineColor = (i == 0) ? xAxisColor : minorColor;
-		vertices.push_back({ XMFLOAT3(center.x - extent, gridY, center.z + offset), lineColor });
-		vertices.push_back({ XMFLOAT3(center.x + extent, gridY, center.z + offset), lineColor });
+		vertices.push_back({ XMFLOAT3(-extent, gridY, offset), lineColor });
+		vertices.push_back({ XMFLOAT3(extent, gridY, offset), lineColor });
 	}
 
 	for (int i = -halfLineCount; i <= halfLineCount; ++i)
 	{
 		const float offset = static_cast<float>(i) * spacing;
 		const XMFLOAT3 lineColor = (i == 0) ? zAxisColor : minorColor;
-		vertices.push_back({ XMFLOAT3(center.x + offset, gridY, center.z - extent), lineColor });
-		vertices.push_back({ XMFLOAT3(center.x + offset, gridY, center.z + extent), lineColor });
+		vertices.push_back({ XMFLOAT3(offset, gridY, -extent), lineColor });
+		vertices.push_back({ XMFLOAT3(offset, gridY, extent), lineColor });
 	}
 
 	m_gridVertexCount = static_cast<UINT>(vertices.size());
@@ -349,6 +350,7 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 
 	m_renderContext->WaitForGpu();
 	m_model.reset();
+	m_modelOffset = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
 	auto device = m_renderContext->GetDevice();
 	m_renderContext->BeginUpload();
@@ -363,10 +365,11 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 	}
 
 	const XMFLOAT3 boundsCenter = model->GetBoundsCenter();
-	const XMFLOAT3 boundsMin = model->GetBoundsMin();
+    const XMFLOAT3 boundsMin = model->GetBoundsMin();
 	const float boundsRadius = model->GetBoundsRadius();
-	m_camera.FrameBoundingSphere(boundsCenter, boundsRadius);
-	CreateGridVertexBuffer(boundsCenter, boundsRadius, boundsMin.y);
+    m_modelOffset = XMFLOAT3(-boundsCenter.x, -boundsMin.y, -boundsCenter.z);
+	m_camera.FrameBoundingSphere(XMFLOAT3(0.0f, boundsCenter.y - boundsMin.y, 0.0f), boundsRadius);
+	CreateGridVertexBuffer(boundsRadius);
 	model->ReleaseUploadBuffers();
 	m_model = std::move(model);
 	SetCustomWindowText(path.c_str());
@@ -379,9 +382,9 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 
 	// --- Scene transform ---
 	const XMMATRIX translate = XMMatrixTranslation(
-		0.0f,
-		0.0f,
-		0.0f);
+		m_modelOffset.x,
+		m_modelOffset.y,
+		m_modelOffset.z);
 	XMMATRIX world = translate;
 
 	const XMMATRIX view = m_camera.GetViewMatrix();

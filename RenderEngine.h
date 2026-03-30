@@ -48,6 +48,7 @@ private:
 	SceneDataConstantBuffer m_sceneDataCbData;
 	UINT8* m_pSceneDataCbvDataBegin;
 	std::wstring m_pendingRenderImagePath;
+	XMFLOAT3 m_modelOffset = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
 	struct GridVertex
 	{
@@ -66,6 +67,6 @@ private:
 	void CreatePipelineState();
 	void CreateGridPipelineState();
 	void CreateSceneDataConstantBuffer();
-	void CreateGridVertexBuffer(const XMFLOAT3& center = XMFLOAT3(0.0f, 0.0f, 0.0f), float radius = 10.0f, float gridY = 0.0f);
+	void CreateGridVertexBuffer(float radius = 10.0f);
 	void LoadModelFromPath(const std::wstring& path);
 };

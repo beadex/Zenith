@@ -50,7 +50,7 @@ void Model::LoadModel(const std::string& path)
 		aiProcess_GenSmoothNormals |
 		aiProcess_SortByPType |
 		aiProcess_GenUVCoords |
-       aiProcess_TransformUVCoords;
+		aiProcess_TransformUVCoords;
 
 	// Read file with optimization flags
 	const aiScene* scene = importer.ReadFile(path, importFlags);
@@ -174,9 +174,7 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 	if (mesh->mMaterialIndex >= 0)
 	{
 		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
-		textures.reserve(
-			material->GetTextureCount(aiTextureType_DIFFUSE) +
-			material->GetTextureCount(aiTextureType_SPECULAR));
+		textures.reserve(material->GetTextureCount(aiTextureType_DIFFUSE) + material->GetTextureCount(aiTextureType_SPECULAR));
 
 		// Load diffuse textures
 		std::vector<Texture> diffuseMaps = LoadMaterialTextures(material, aiTextureType_DIFFUSE, "texture_diffuse", scene);
