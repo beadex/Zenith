@@ -43,22 +43,14 @@ void Model::LoadModel(const std::string& path)
 	Assimp::Importer importer;
 
 	unsigned int importFlags =
-		aiProcess_CalcTangentSpace |
 		aiProcess_JoinIdenticalVertices |
 		aiProcess_Triangulate |
 		aiProcess_PreTransformVertices |
 		aiProcess_ConvertToLeftHanded |
-		aiProcess_RemoveComponent |
 		aiProcess_GenSmoothNormals |
-		aiProcess_SplitLargeMeshes |
-		aiProcess_ValidateDataStructure |
-		aiProcess_RemoveRedundantMaterials |
 		aiProcess_SortByPType |
-		aiProcess_FindInvalidData |
 		aiProcess_GenUVCoords |
-		aiProcess_TransformUVCoords |
-		aiProcess_OptimizeMeshes |
-		aiProcess_OptimizeGraph;
+       aiProcess_TransformUVCoords;
 
 	// Read file with optimization flags
 	const aiScene* scene = importer.ReadFile(path, importFlags);

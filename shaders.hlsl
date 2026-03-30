@@ -46,6 +46,18 @@ struct PSInput
     float2 uv : TEXCOORD;
 };
 
+struct GridVSInput
+{
+    float3 position : POSITION;
+    float3 color : COLOR;
+};
+
+struct GridPSInput
+{
+    float4 position : SV_POSITION;
+    float3 color : COLOR;
+};
+
 // ============================================================
 // Vertex Shader
 // ============================================================
@@ -83,4 +95,20 @@ float4 PSMain(PSInput input) : SV_TARGET
     }
 
     return float4(albedo, 1.0f);
+}
+
+GridPSInput GridVSMain(GridVSInput input)
+{
+    GridPSInput output;
+
+    float4 worldPos = float4(input.position, 1.0f);
+    output.position = mul(mul(worldPos, sceneData.view), sceneData.projection);
+    output.color = input.color;
+
+    return output;
+}
+
+float4 GridPSMain(GridPSInput input) : SV_TARGET
+{
+    return float4(input.color, 1.0f);
 }

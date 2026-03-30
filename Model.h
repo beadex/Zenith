@@ -17,13 +17,14 @@ public:
 	void ReleaseUploadBuffers();
 
 	ID3D12DescriptorHeap* GetSRVHeap() const { return m_srvHeap.Get(); }
-    XMFLOAT3 GetBoundsCenter() const { return m_boundsCenter; }
+	XMFLOAT3 GetBoundsMin() const { return m_boundsMin; }
+	XMFLOAT3 GetBoundsCenter() const { return m_boundsCenter; }
 	float GetBoundsRadius() const { return m_boundsRadius; }
 private:
 	std::unordered_map<std::string, UINT> m_textureCache;
 	std::unordered_set<std::string> m_loadedPaths;
 	std::vector<Mesh> m_meshes;
-    XMFLOAT3 m_boundsMin;
+	XMFLOAT3 m_boundsMin;
 	XMFLOAT3 m_boundsMax;
 	XMFLOAT3 m_boundsCenter = XMFLOAT3(0.0f, 0.0f, 0.0f);
 	float m_boundsRadius = 0.0f;

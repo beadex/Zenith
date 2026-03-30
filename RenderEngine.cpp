@@ -4,6 +4,7 @@
 #include "D3D12ApplicationHelper.h"
 
 #pragma comment(lib, "Comdlg32.lib")
+#pragma comment(lib, "d3dcompiler.lib")
 
 namespace
 {
@@ -15,7 +16,7 @@ namespace
 		}
 
 		const int requiredSize = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), -1, nullptr, 0, nullptr, nullptr);
-     if (requiredSize <= 1)
+		if (requiredSize <= 1)
 		{
 			return {};
 		}
@@ -23,7 +24,7 @@ namespace
 		std::vector<char> buffer(static_cast<size_t>(requiredSize));
 		WideCharToMultiByte(CP_UTF8, 0, value.c_str(), -1, buffer.data(), requiredSize, nullptr, nullptr);
 
-       return std::string(buffer.data());
+		return std::string(buffer.data());
 	}
 }
 
@@ -57,7 +58,9 @@ void ZenithRenderEngine::OnInit()
 	// 2. Load Assets (Shader, Geometry...)
 	CreateRootSignature();
 	CreatePipelineState();
+	CreateGridPipelineState();
 	CreateSceneDataConstantBuffer();
+	CreateGridVertexBuffer();
 }
 
 bool ZenithRenderEngine::OnCommand(UINT commandId)
@@ -82,7 +85,7 @@ bool ZenithRenderEngine::OnCommand(UINT commandId)
 		}
 
 		return true;
-}
+	}
 	case IDM_ABOUT:
 		MessageBoxW(
 			Win32Application::GetHwnd(),
@@ -90,7 +93,7 @@ bool ZenithRenderEngine::OnCommand(UINT commandId)
 			GetTitle(),
 			MB_OK | MB_ICONINFORMATION);
 		return true;
-    case IDM_RENDER_IMAGE:
+	case IDM_RENDER_IMAGE:
 	{
 		wchar_t filePath[MAX_PATH] = L"render.png";
 		OPENFILENAMEW saveFileName = {};
@@ -219,8 +222,51 @@ void ZenithRenderEngine::CreatePipelineState()
 
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)));
 
-	delete[] pVertexShaderData;
-	delete[] pPixelShaderData;
+	free(pVertexShaderData);
+	free(pPixelShaderData);
+}
+
+void ZenithRenderEngine::CreateGridPipelineState()
+{
+	auto device = m_renderContext->GetDevice();
+	UINT8* pVertexShaderData = nullptr;
+	UINT8* pPixelShaderData = nullptr;
+	UINT vertexShaderDataLength = 0;
+	UINT pixelShaderDataLength = 0;
+
+	// Load file shaders.hlsl (bạn cần tạo file này trong project)
+	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_GridVSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength));
+	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_GridPSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength));
+
+	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+	psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
+	psoDesc.pRootSignature = m_rootSignature.Get();
+	psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
+	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
+	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+	psoDesc.SampleMask = UINT_MAX;
+	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+	psoDesc.NumRenderTargets = 1;
+	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	psoDesc.SampleDesc.Count = 1;
+	psoDesc.SampleDesc.Quality = 0;
+	psoDesc.DepthStencilState.DepthEnable = TRUE;
+	psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+	psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+	psoDesc.DepthStencilState.StencilEnable = FALSE;
+
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_gridPipelineState)));
+
+	free(pVertexShaderData);
+	free(pPixelShaderData);
 }
 
 void ZenithRenderEngine::CreateSceneDataConstantBuffer()
@@ -241,6 +287,57 @@ void ZenithRenderEngine::CreateSceneDataConstantBuffer()
 	CD3DX12_RANGE readRange(0, 0); // Chúng ta không đọc từ GPU
 	ThrowIfFailed(m_sceneDataConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pSceneDataCbvDataBegin)));
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
+}
+
+void ZenithRenderEngine::CreateGridVertexBuffer(const XMFLOAT3& center, float radius, float gridY)
+{
+	constexpr int halfLineCount = 10;
+	const float spacing = (std::max)(1.0f, ceilf((std::max)(radius, 1.0f) / static_cast<float>(halfLineCount)));
+	const float extent = static_cast<float>(halfLineCount) * spacing;
+	const XMFLOAT3 minorColor(0.25f, 0.25f, 0.25f);
+	const XMFLOAT3 xAxisColor(0.55f, 0.20f, 0.20f);
+	const XMFLOAT3 zAxisColor(0.20f, 0.35f, 0.60f);
+
+	std::vector<GridVertex> vertices;
+	vertices.reserve(static_cast<size_t>((halfLineCount * 2 + 1) * 4));
+
+	for (int i = -halfLineCount; i <= halfLineCount; ++i)
+	{
+		const float offset = static_cast<float>(i) * spacing;
+		const XMFLOAT3 lineColor = (i == 0) ? xAxisColor : minorColor;
+		vertices.push_back({ XMFLOAT3(center.x - extent, gridY, center.z + offset), lineColor });
+		vertices.push_back({ XMFLOAT3(center.x + extent, gridY, center.z + offset), lineColor });
+	}
+
+	for (int i = -halfLineCount; i <= halfLineCount; ++i)
+	{
+		const float offset = static_cast<float>(i) * spacing;
+		const XMFLOAT3 lineColor = (i == 0) ? zAxisColor : minorColor;
+		vertices.push_back({ XMFLOAT3(center.x + offset, gridY, center.z - extent), lineColor });
+		vertices.push_back({ XMFLOAT3(center.x + offset, gridY, center.z + extent), lineColor });
+	}
+
+	m_gridVertexCount = static_cast<UINT>(vertices.size());
+	const UINT bufferSize = static_cast<UINT>(vertices.size() * sizeof(GridVertex));
+	auto device = m_renderContext->GetDevice();
+
+	ThrowIfFailed(device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(bufferSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&m_gridVertexBuffer)));
+
+	UINT8* mappedData = nullptr;
+	CD3DX12_RANGE readRange(0, 0);
+	ThrowIfFailed(m_gridVertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&mappedData)));
+	memcpy(mappedData, vertices.data(), bufferSize);
+	m_gridVertexBuffer->Unmap(0, nullptr);
+
+	m_gridVertexBufferView.BufferLocation = m_gridVertexBuffer->GetGPUVirtualAddress();
+	m_gridVertexBufferView.StrideInBytes = sizeof(GridVertex);
+	m_gridVertexBufferView.SizeInBytes = bufferSize;
 }
 
 void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
@@ -265,7 +362,11 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 		return;
 	}
 
-  m_camera.FrameBoundingSphere(model->GetBoundsCenter(), model->GetBoundsRadius());
+	const XMFLOAT3 boundsCenter = model->GetBoundsCenter();
+	const XMFLOAT3 boundsMin = model->GetBoundsMin();
+	const float boundsRadius = model->GetBoundsRadius();
+	m_camera.FrameBoundingSphere(boundsCenter, boundsRadius);
+	CreateGridVertexBuffer(boundsCenter, boundsRadius, boundsMin.y);
 	model->ReleaseUploadBuffers();
 	m_model = std::move(model);
 	SetCustomWindowText(path.c_str());
@@ -298,7 +399,7 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 
 void ZenithRenderEngine::OnRender(const Timer& timer)
 {
-   std::wstring capturePath = std::move(m_pendingRenderImagePath);
+	std::wstring capturePath = std::move(m_pendingRenderImagePath);
 	m_pendingRenderImagePath.clear();
 
 	// 1. Prepare the command list for rendering (Reset command allocator, command list, set render target, etc.)
@@ -306,9 +407,8 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 
 	auto commandList = m_renderContext->GetCommandList();
 
-	// 2. Set the root signature and pipeline state for rendering
+	// 2. Set the root signature for rendering
 	commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-	commandList->SetPipelineState(m_pipelineState.Get());
 
 	// 3. Update constant buffer with the latest transformation matrices (Model-View-Projection)
 	commandList->SetGraphicsRootConstantBufferView(1, m_sceneDataConstantBuffer->GetGPUVirtualAddress());
@@ -330,13 +430,23 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
+	ID3D12DescriptorHeap* gridHeaps[] = { m_renderContext->GetCbvSrvHeap() };
+	commandList->SetDescriptorHeaps(_countof(gridHeaps), gridHeaps);
+	commandList->SetGraphicsRootDescriptorTable(0, gridHeaps[0]->GetGPUDescriptorHandleForHeapStart());
+	commandList->SetPipelineState(m_gridPipelineState.Get());
+	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+	commandList->IASetVertexBuffers(0, 1, &m_gridVertexBufferView);
+	commandList->DrawInstanced(m_gridVertexCount, 1, 0, 0);
+
+	commandList->SetPipelineState(m_pipelineState.Get());
+
 	// 6. Draw the model
 	if (m_model) {
 		m_model->Draw(commandList);
 	}
 
 	// 7. Record commands to draw geometry here (Set pipeline state, set root signature, set vertex/index buffers, draw calls, etc.)
- const bool captureSucceeded = m_renderContext->Present(capturePath);
+	const bool captureSucceeded = m_renderContext->Present(capturePath);
 	if (!capturePath.empty() && !captureSucceeded)
 	{
 		MessageBoxW(

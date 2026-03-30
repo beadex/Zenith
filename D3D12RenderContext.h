@@ -57,6 +57,7 @@ public:
         return m_cbvSrvHeap->GetCPUDescriptorHandleForHeapStart();
 	}
 	UINT GetCbvSrvDescriptorSize() const { return m_cbvSrvDescriptorSize; };
+    ID3D12DescriptorHeap* GetCbvSrvHeap() const { return m_cbvSrvHeap.Get(); }
 
 private:
     ComPtr<IDXGIFactory4> m_factory;
