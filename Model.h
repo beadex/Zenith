@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cfloat>
+
 #include "Mesh.h"
 
 class Model
@@ -15,10 +17,16 @@ public:
 	void ReleaseUploadBuffers();
 
 	ID3D12DescriptorHeap* GetSRVHeap() const { return m_srvHeap.Get(); }
+    XMFLOAT3 GetBoundsCenter() const { return m_boundsCenter; }
+	float GetBoundsRadius() const { return m_boundsRadius; }
 private:
 	std::unordered_map<std::string, UINT> m_textureCache;
 	std::unordered_set<std::string> m_loadedPaths;
 	std::vector<Mesh> m_meshes;
+    XMFLOAT3 m_boundsMin;
+	XMFLOAT3 m_boundsMax;
+	XMFLOAT3 m_boundsCenter = XMFLOAT3(0.0f, 0.0f, 0.0f);
+	float m_boundsRadius = 0.0f;
 	std::string m_directory;
 	ID3D12Device* m_device;
 	ID3D12GraphicsCommandList* m_commandList;

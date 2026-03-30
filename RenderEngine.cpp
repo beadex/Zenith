@@ -27,18 +27,27 @@ namespace
 	}
 }
 
-ZenithRenderEngine::ZenithRenderEngine(UINT width, UINT height, std::wstring name) :
-	D3D12Application(width, height, name),
-	m_model(nullptr),
-	m_viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
-	m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
-	m_cameraPos(XMVectorSet(0.0f, 0.0f, 8.0f, 1.0f)),
-	m_cameraFront(XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f)),
-	m_cameraUp(XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f)),
-	m_sceneDataCbData{},
-	m_pSceneDataCbvDataBegin(nullptr)
+// ---------------------------------------------------------------------------
+// Construction
+// ---------------------------------------------------------------------------
+
+ZenithRenderEngine::ZenithRenderEngine(UINT width, UINT height, std::wstring name)
+	: D3D12Application(width, height, name)
+	, m_model(nullptr)
+	, m_viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height))
+	, m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height))
+	, m_sceneDataCbData{}
+	, m_pSceneDataCbvDataBegin(nullptr)
 {
+	// Configure the camera lens once we know the viewport size
+	m_camera.SetLens(XM_PIDIV4,
+		static_cast<float>(width) / static_cast<float>(height),
+		0.1f, 500.0f);
 }
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
 
 void ZenithRenderEngine::OnInit()
 {
@@ -236,6 +245,7 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 		return;
 	}
 
+  m_camera.FrameBoundingSphere(model->GetBoundsCenter(), model->GetBoundsRadius());
 	model->ReleaseUploadBuffers();
 	m_model = std::move(model);
 	SetCustomWindowText(path.c_str());
@@ -243,23 +253,26 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 
 void ZenithRenderEngine::OnUpdate(const Timer& timer)
 {
-	float angle = timer.TotalTime();
+	// Update camera (smoothing / spring hook – currently instant)
+	m_camera.Update();
 
-	XMMATRIX scale = XMMatrixScaling(0.5f, 0.5f, 0.5f); // ← thêm lại
-	XMMATRIX world = scale * XMMatrixRotationY(angle);
-	XMMATRIX view = XMMatrixLookAtLH(
-		m_cameraPos,  // Eye position
-		m_cameraPos + m_cameraFront,    // Look-at target
-		m_cameraUp     // Up direction
-	);
-	XMMATRIX proj = XMMatrixPerspectiveFovLH(XM_PIDIV4, m_aspectRatio, 0.5f, 50.0f);
-	const XMMATRIX normalMatrix = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+	// --- Scene transform (model slowly rotates for visual interest) ---
+	const XMMATRIX translate = XMMatrixTranslation(
+		0.0f,
+		0.0f,
+		0.0f);
+	XMMATRIX world = translate;
 
-	// Transpose because HLSL expects column-major by default
-	XMStoreFloat4x4(&m_sceneDataCbData.projection, XMMatrixTranspose(proj));
-	XMStoreFloat4x4(&m_sceneDataCbData.view, XMMatrixTranspose(view));
+	const XMMATRIX view = m_camera.GetViewMatrix();
+	const XMMATRIX proj = m_camera.GetProjectionMatrix();
+	const XMMATRIX normalMat = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+
+	// HLSL expects column-major (transpose before upload)
 	XMStoreFloat4x4(&m_sceneDataCbData.model, XMMatrixTranspose(world));
-	XMStoreFloat4x4(&m_sceneDataCbData.normalMatrix, normalMatrix);
+	XMStoreFloat4x4(&m_sceneDataCbData.view, XMMatrixTranspose(view));
+	XMStoreFloat4x4(&m_sceneDataCbData.projection, XMMatrixTranspose(proj));
+	XMStoreFloat4x4(&m_sceneDataCbData.normalMatrix, normalMat);
+
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
 }
 
@@ -289,7 +302,7 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	);
 	CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_renderContext->GetDsvHeapStart());
 
-	const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+	const float clearColor[] = { 0.05f, 0.05f, 0.05f, 1.0f };
 	commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
@@ -307,4 +320,30 @@ void ZenithRenderEngine::OnDestroy()
 {
 	// Make sure to wait for the GPU to finish all pending work before exiting to avoid access violations and ensure proper cleanup of resources.
 	m_renderContext->WaitForGpu();
+}
+
+// ---------------------------------------------------------------------------
+// Mouse handlers – delegate straight to the Camera
+// ---------------------------------------------------------------------------
+
+void ZenithRenderEngine::OnMiddleButtonDown(int x, int y)
+{
+	m_camera.OnMiddleButtonDown(x, y);
+}
+
+void ZenithRenderEngine::OnMiddleButtonUp(int x, int y)
+{
+	m_camera.OnMiddleButtonUp();
+}
+
+void ZenithRenderEngine::OnMouseMove(int x, int y, WPARAM btnState)
+{
+	// Shift held = pan, otherwise orbit
+	const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+	m_camera.OnMouseMove(x, y, shiftDown);
+}
+
+void ZenithRenderEngine::OnMouseWheel(float wheelDelta)
+{
+	m_camera.OnMouseWheel(wheelDelta);
 }

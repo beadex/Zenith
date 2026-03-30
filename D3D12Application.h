@@ -21,6 +21,12 @@ public:
     virtual void OnKeyUp(UINT8 /*key*/) {}
     virtual bool OnCommand(UINT /*commandId*/) { return false; }
 
+    // Mouse Input
+    virtual void OnMouseMove(int /*x*/, int /*y*/, WPARAM /*btnState*/) {}
+    virtual void OnMiddleButtonDown(int /*x*/, int /*y*/) {}
+    virtual void OnMiddleButtonUp(int /*x*/, int /*y*/) {}
+    virtual void OnMouseWheel(float /*wheelDelta*/) {}
+
     // Accessors
     UINT GetWidth() const { return m_width; }
     UINT GetHeight() const { return m_height; }
@@ -32,12 +38,12 @@ protected:
     std::wstring GetAssetFullPath(LPCWSTR assetName);
     void SetCustomWindowText(LPCWSTR text);
 
-    // Kích thước Viewport
+    // Viewport dimensions
     UINT m_width;
     UINT m_height;
     float m_aspectRatio;
 
-    // Hệ thống Render tách biệt
+    // Render system
     std::unique_ptr<D3D12RenderContext> m_renderContext;
 
     bool m_useWarpDevice;

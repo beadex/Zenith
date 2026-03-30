@@ -2,6 +2,7 @@
 
 #include "D3D12Application.h"
 #include "Model.h"
+#include "Camera.h"
 
 class ZenithRenderEngine : public D3D12Application
 {
@@ -14,6 +15,12 @@ public:
     virtual void OnRender(const Timer& timer) override;
     virtual void OnDestroy() override;
     virtual bool OnCommand(UINT commandId) override;
+
+    // Mouse input (routed from Win32Application)
+    virtual void OnMouseMove(int x, int y, WPARAM btnState)  override;
+    virtual void OnMiddleButtonDown(int x, int y)            override;
+    virtual void OnMiddleButtonUp(int x, int y)              override;
+    virtual void OnMouseWheel(float wheelDelta)              override;
 
 private:
     // Here we will load the pipeline state, root signature, and any assets (like shaders, textures, etc.)
@@ -40,10 +47,8 @@ private:
     SceneDataConstantBuffer m_sceneDataCbData;
     UINT8* m_pSceneDataCbvDataBegin;
 
-    // Camera props
-    XMVECTOR m_cameraPos;
-    XMVECTOR m_cameraFront;
-    XMVECTOR m_cameraUp;
+    // Camera
+    Camera m_camera;
 
     void CreateRootSignature();
     void CreatePipelineState();

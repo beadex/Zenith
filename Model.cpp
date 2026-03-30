@@ -2,9 +2,13 @@
 #include "Model.h"
 #include "D3D12ApplicationHelper.h"
 
+#include <algorithm>
+
 using namespace DirectX;
 
 Model::Model(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
+   m_boundsMin(FLT_MAX, FLT_MAX, FLT_MAX),
+	m_boundsMax(-FLT_MAX, -FLT_MAX, -FLT_MAX),
 	m_device(device),
 	m_commandList(commandList)
 {
@@ -45,6 +49,7 @@ void Model::LoadModel(const std::string& path)
 		aiProcess_CalcTangentSpace |
 		aiProcess_JoinIdenticalVertices |
 		aiProcess_Triangulate |
+		aiProcess_PreTransformVertices |
 		aiProcess_FlipUVs |
 		aiProcess_RemoveComponent |
 		aiProcess_GenSmoothNormals |
@@ -70,6 +75,19 @@ void Model::LoadModel(const std::string& path)
 
 	// Process the root node recursively
 	ProcessNode(scene->mRootNode, scene);
+
+	if (!m_meshes.empty())
+	{
+		m_boundsCenter = XMFLOAT3(
+			(m_boundsMin.x + m_boundsMax.x) * 0.5f,
+			(m_boundsMin.y + m_boundsMax.y) * 0.5f,
+			(m_boundsMin.z + m_boundsMax.z) * 0.5f);
+
+		const XMVECTOR minV = XMLoadFloat3(&m_boundsMin);
+		const XMVECTOR maxV = XMLoadFloat3(&m_boundsMax);
+		const XMVECTOR centerV = XMLoadFloat3(&m_boundsCenter);
+		m_boundsRadius = XMVectorGetX(XMVector3Length(maxV - centerV));
+	}
 
 	// After all the meshes and textures are loaded, create the SRV heap and upload textures to GPU
 	CreateSRVHeap();
@@ -115,6 +133,13 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		vector.z = mesh->mVertices[i].z;
 
 		vertex.Position = vector;
+
+		m_boundsMin.x = (std::min)(m_boundsMin.x, vector.x);
+		m_boundsMin.y = (std::min)(m_boundsMin.y, vector.y);
+		m_boundsMin.z = (std::min)(m_boundsMin.z, vector.z);
+		m_boundsMax.x = (std::max)(m_boundsMax.x, vector.x);
+		m_boundsMax.y = (std::max)(m_boundsMax.y, vector.y);
+		m_boundsMax.z = (std::max)(m_boundsMax.z, vector.z);
 
 		// Process vertex normals
 		if (mesh->HasNormals())

@@ -211,6 +211,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Camera.h" />
     <ClInclude Include="D3D12Application.h" />
     <ClInclude Include="D3D12ApplicationHelper.h" />
     <ClInclude Include="framework.h" />
@@ -225,6 +226,7 @@
     <ClInclude Include="Win32Application.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Camera.cpp" />
     <ClCompile Include="D3D12Application.cpp" />
     <ClCompile Include="D3D12RenderContext.cpp" />
     <ClCompile Include="Mesh.cpp" />
