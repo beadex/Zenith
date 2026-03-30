@@ -39,6 +39,8 @@ ZenithRenderEngine::ZenithRenderEngine(UINT width, UINT height, std::wstring nam
 	, m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height))
 	, m_sceneDataCbData{}
 	, m_pSceneDataCbvDataBegin(nullptr)
+	, m_lightingDataCbData{}
+	, m_pLightingDataCbvDataBegin(nullptr)
 {
 	// Configure the camera lens once we know the viewport size
 	m_camera.SetLens(XM_PIDIV4,
@@ -60,7 +62,9 @@ void ZenithRenderEngine::OnInit()
 	CreatePipelineState();
 	CreateGridPipelineState();
 	CreateSceneDataConstantBuffer();
+	CreateLightingDataConstantBuffer();
 	CreateGridVertexBuffer();
+   UpdateLightingMenuState();
 }
 
 bool ZenithRenderEngine::OnCommand(UINT commandId)
@@ -113,9 +117,28 @@ bool ZenithRenderEngine::OnCommand(UINT commandId)
 
 		return true;
 	}
+    case IDM_VIEW_DIRECTIONAL_LIGHT:
+		m_directionalLightEnabled = !m_directionalLightEnabled;
+		UpdateLightingMenuState();
+		return true;
 	default:
 		return false;
 	}
+}
+
+void ZenithRenderEngine::UpdateLightingMenuState() const
+{
+	HMENU menu = GetMenu(Win32Application::GetHwnd());
+	if (!menu)
+	{
+		return;
+	}
+
+	CheckMenuItem(
+		menu,
+		IDM_VIEW_DIRECTIONAL_LIGHT,
+		MF_BYCOMMAND | (m_directionalLightEnabled ? MF_CHECKED : MF_UNCHECKED));
+	DrawMenuBar(Win32Application::GetHwnd());
 }
 
 void ZenithRenderEngine::CreateRootSignature()
@@ -136,7 +159,7 @@ void ZenithRenderEngine::CreateRootSignature()
 	ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
 
 	// 1. Tạo Root Signature
-	CD3DX12_ROOT_PARAMETER1 rootParameters[3];
+	CD3DX12_ROOT_PARAMETER1 rootParameters[4];
 	// Root param 0: SRV heap (texture array) → pixel shader
 	rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_PIXEL);
 
@@ -146,6 +169,10 @@ void ZenithRenderEngine::CreateRootSignature()
 
 	// Root param 2: MaterialData b1 → pixel shader (CBV trực tiếp, không qua table)
 	rootParameters[2].InitAsConstantBufferView(1, 0,
+		D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC, D3D12_SHADER_VISIBILITY_PIXEL);
+
+	// Root param 3: LightingData b2 → pixel shader (CBV trực tiếp, không qua table)
+	rootParameters[3].InitAsConstantBufferView(2, 0,
 		D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC, D3D12_SHADER_VISIBILITY_PIXEL);
 
 	D3D12_STATIC_SAMPLER_DESC sampler = {};
@@ -289,6 +316,26 @@ void ZenithRenderEngine::CreateSceneDataConstantBuffer()
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
 }
 
+void ZenithRenderEngine::CreateLightingDataConstantBuffer()
+{
+	auto device = m_renderContext->GetDevice();
+	// Kích thước Constant Buffer phải là bội số của 256 bytes
+	UINT constantBufferSize = (sizeof(LightingDataConstantBuffer) + 255) & ~255;
+
+	ThrowIfFailed(device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(constantBufferSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&m_lightingDataConstantBuffer)));
+
+	// Map vùng nhớ để CPU có thể ghi dữ liệu vào m_pCbvDataBegin
+	CD3DX12_RANGE readRange(0, 0); // Chúng ta không đọc từ GPU
+	ThrowIfFailed(m_lightingDataConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pLightingDataCbvDataBegin)));
+	memcpy(m_pLightingDataCbvDataBegin, &m_lightingDataCbData, sizeof(m_lightingDataCbData));
+}
+
 void ZenithRenderEngine::CreateGridVertexBuffer(float radius)
 {
 	constexpr int halfLineCount = 10;
@@ -397,7 +444,24 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 	XMStoreFloat4x4(&m_sceneDataCbData.projection, XMMatrixTranspose(proj));
 	XMStoreFloat4x4(&m_sceneDataCbData.normalMatrix, normalMat);
 
+	XMStoreFloat4(&m_lightingDataCbData.viewPosition, m_camera.GetPosition());
+
+	m_lightingDataCbData.directionalLight.direction = XMFLOAT4(-0.2f, -1.0f, -0.3f, 1.0f);
+   if (m_directionalLightEnabled)
+	{
+		m_lightingDataCbData.directionalLight.ambient = XMFLOAT4(0.2f, 0.2f, 0.2f, 1.0f);
+		m_lightingDataCbData.directionalLight.diffuse = XMFLOAT4(0.5f, 0.5f, 0.5f, 1.0f);
+		m_lightingDataCbData.directionalLight.specular = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	}
+	else
+	{
+		m_lightingDataCbData.directionalLight.ambient = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
+		m_lightingDataCbData.directionalLight.diffuse = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
+		m_lightingDataCbData.directionalLight.specular = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
+	}
+
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
+	memcpy(m_pLightingDataCbvDataBegin, &m_lightingDataCbData, sizeof(m_lightingDataCbData));
 }
 
 void ZenithRenderEngine::OnRender(const Timer& timer)
@@ -415,6 +479,7 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 
 	// 3. Update constant buffer with the latest transformation matrices (Model-View-Projection)
 	commandList->SetGraphicsRootConstantBufferView(1, m_sceneDataConstantBuffer->GetGPUVirtualAddress());
+	commandList->SetGraphicsRootConstantBufferView(3, m_lightingDataConstantBuffer->GetGPUVirtualAddress());
 
 	// 4. Set up scissor rect and viewport
 	commandList->RSSetViewports(1, &m_viewport);

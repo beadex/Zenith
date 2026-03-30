@@ -60,6 +60,27 @@ private:
 	D3D12_VERTEX_BUFFER_VIEW m_gridVertexBufferView{};
 	UINT m_gridVertexCount = 0;
 
+	struct DirectionalLightData
+	{
+		XMFLOAT4 direction;
+		XMFLOAT4 ambient;
+		XMFLOAT4 diffuse;
+		XMFLOAT4 specular;
+	};
+
+	struct LightingDataConstantBuffer
+	{
+		DirectionalLightData directionalLight;
+		XMFLOAT4 viewPosition;
+		float padding[44];
+	};
+	static_assert((sizeof(LightingDataConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
+
+	ComPtr<ID3D12Resource> m_lightingDataConstantBuffer;
+	LightingDataConstantBuffer m_lightingDataCbData;
+	UINT8* m_pLightingDataCbvDataBegin;
+	bool m_directionalLightEnabled = true;
+
 	// Camera
 	Camera m_camera;
 
@@ -67,6 +88,8 @@ private:
 	void CreatePipelineState();
 	void CreateGridPipelineState();
 	void CreateSceneDataConstantBuffer();
+	void CreateLightingDataConstantBuffer();
 	void CreateGridVertexBuffer(float radius = 10.0f);
 	void LoadModelFromPath(const std::wstring& path);
+  void UpdateLightingMenuState() const;
 };

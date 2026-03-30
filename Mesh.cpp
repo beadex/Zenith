@@ -23,6 +23,10 @@ void Mesh::Draw(ID3D12GraphicsCommandList* commandList)
 
 void Mesh::SetMaterialData(const MaterialData& data)
 {
+	OutputDebugStringA(("SetMaterialData: diffuseStart=" + std::to_string(data.diffuseStartIndex) +
+		" numDiffuse=" + std::to_string(data.numDiffuse) +
+		" specularStart=" + std::to_string(data.specularStartIndex) +
+		" numSpecular=" + std::to_string(data.numSpecular) + "\n").c_str());
 	m_materialData = data;
 	// m_mappedMaterialData luôn valid vì giữ mapped suốt lifetime
 	memcpy(m_mappedMaterialData, &data, sizeof(MaterialData));

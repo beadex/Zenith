@@ -20,6 +20,21 @@ struct MaterialData
 };
 ConstantBuffer<MaterialData> materialData : register(b1);
 
+struct DirectionalLightData
+{
+    float4 direction;
+    float4 ambient;
+    float4 diffuse;
+    float4 specular;
+};
+
+struct LightingData
+{
+    DirectionalLightData directionalLight;
+    float4 viewPos;
+};
+ConstantBuffer<LightingData> lightingData : register(b2);
+
 // ============================================================
 // Resources
 // ============================================================
@@ -58,6 +73,8 @@ struct GridPSInput
     float3 color : COLOR;
 };
 
+float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv);
+
 // ============================================================
 // Vertex Shader
 // ============================================================
@@ -81,20 +98,42 @@ PSInput VSMain(VSInput input)
 
 float4 PSMain(PSInput input) : SV_TARGET
 {
-    float3 albedo = float3(0.0f, 0.0f, 0.0f);
+    float3 norm = normalize(input.normal);
+    float3 viewDir = normalize(lightingData.viewPos.xyz - input.worldPos);
 
+    float3 result = CalcDirLight(lightingData.directionalLight, norm, viewDir, input.uv);
+
+    const float gamma = 2.2f;
+    float3 gammaCorrected = pow(saturate(result), 1.0f / gamma);
+
+    return float4(gammaCorrected, 1.0f);
+}
+
+float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv)
+{
+    float3 albedo = float3(1.0f, 1.0f, 1.0f);
+    float3 specMap = float3(1.0f, 1.0f, 1.0f);
     if (materialData.numDiffuse > 0)
     {
-        albedo = gTextures[materialData.diffuseStartIndex].Sample(g_sampler, input.uv).rgb;
+        albedo = gTextures[materialData.diffuseStartIndex].Sample(g_sampler, uv).rgb;
     }
 
-    // Fallback: nếu không có diffuse map, dùng màu trắng
-    if (materialData.numDiffuse == 0)
+    if (materialData.numSpecular > 0)
     {
-        albedo = input.normal * 0.5f + 0.5f;
+        specMap = gTextures[materialData.specularStartIndex].Sample(g_sampler, uv).rgb;
     }
 
-    return float4(albedo, 1.0f);
+    float3 lightDir = normalize(-light.direction.xyz);
+    float diff = max(dot(normal, lightDir), 0.0f);
+
+    float3 halfwayDir = normalize(lightDir + viewDir);
+    float spec = pow(max(dot(normal, halfwayDir), 0.0f), 0.6f * 128.0f);
+
+    float3 ambient = light.ambient.rgb * albedo;
+    float3 diffuse = light.diffuse.rgb * diff * albedo;
+    float3 specular = light.specular.rgb * spec * specMap;
+
+    return ambient + diffuse + specular;
 }
 
 GridPSInput GridVSMain(GridVSInput input)
