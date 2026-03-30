@@ -6,6 +6,7 @@
 // Windows Header Files
 #include <windows.h>
 #include <windowsx.h>
+#include <wincodec.h>
 // Direct3D 12 Header Files
 #include <d3d12.h>
 #include <dxgi1_6.h>

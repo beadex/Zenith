@@ -9,14 +9,17 @@ HMENU Win32Application::CreateApplicationMenu()
 {
     HMENU menuBar = CreateMenu();
     HMENU fileMenu = CreatePopupMenu();
+    HMENU renderMenu = CreatePopupMenu();
     HMENU helpMenu = CreatePopupMenu();
 
     AppendMenu(fileMenu, MF_STRING, IDM_FILE_LOAD_MODEL, L"Load Model...");
     AppendMenu(fileMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenu(fileMenu, MF_STRING, IDM_EXIT, L"Exit");
+    AppendMenu(renderMenu, MF_STRING, IDM_RENDER_IMAGE, L"Render Image...");
     AppendMenu(helpMenu, MF_STRING, IDM_ABOUT, L"About");
 
     AppendMenu(menuBar, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"Files");
+    AppendMenu(menuBar, MF_POPUP, reinterpret_cast<UINT_PTR>(renderMenu), L"Render");
     AppendMenu(menuBar, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), L"Help");
 
     return menuBar;

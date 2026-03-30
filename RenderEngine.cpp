@@ -90,6 +90,26 @@ bool ZenithRenderEngine::OnCommand(UINT commandId)
 			GetTitle(),
 			MB_OK | MB_ICONINFORMATION);
 		return true;
+    case IDM_RENDER_IMAGE:
+	{
+		wchar_t filePath[MAX_PATH] = L"render.png";
+		OPENFILENAMEW saveFileName = {};
+		saveFileName.lStructSize = sizeof(saveFileName);
+		saveFileName.hwndOwner = Win32Application::GetHwnd();
+		saveFileName.lpstrFile = filePath;
+		saveFileName.nMaxFile = _countof(filePath);
+		saveFileName.lpstrFilter = L"PNG Image\0*.png\0All Files\0*.*\0\0";
+		saveFileName.nFilterIndex = 1;
+		saveFileName.lpstrDefExt = L"png";
+		saveFileName.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+
+		if (GetSaveFileNameW(&saveFileName))
+		{
+			m_pendingRenderImagePath = filePath;
+		}
+
+		return true;
+	}
 	default:
 		return false;
 	}
@@ -278,6 +298,9 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 
 void ZenithRenderEngine::OnRender(const Timer& timer)
 {
+   std::wstring capturePath = std::move(m_pendingRenderImagePath);
+	m_pendingRenderImagePath.clear();
+
 	// 1. Prepare the command list for rendering (Reset command allocator, command list, set render target, etc.)
 	m_renderContext->Prepare();
 
@@ -313,7 +336,15 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	}
 
 	// 7. Record commands to draw geometry here (Set pipeline state, set root signature, set vertex/index buffers, draw calls, etc.)
-	m_renderContext->Present();
+ const bool captureSucceeded = m_renderContext->Present(capturePath);
+	if (!capturePath.empty() && !captureSucceeded)
+	{
+		MessageBoxW(
+			Win32Application::GetHwnd(),
+			L"Failed to save the rendered image.",
+			GetTitle(),
+			MB_OK | MB_ICONERROR);
+	}
 }
 
 void ZenithRenderEngine::OnDestroy()

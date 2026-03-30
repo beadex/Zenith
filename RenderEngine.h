@@ -46,6 +46,7 @@ private:
     ComPtr<ID3D12Resource> m_sceneDataConstantBuffer;
     SceneDataConstantBuffer m_sceneDataCbData;
     UINT8* m_pSceneDataCbvDataBegin;
+    std::wstring m_pendingRenderImagePath;
 
     // Camera
     Camera m_camera;

@@ -26,7 +26,7 @@ public:
     void Prepare();
 
 	// Finish rendering and present the frame (Execute command list, present swap chain, signal fence, etc.)
-    void Present();
+ bool Present(const std::wstring& capturePath = L"");
 
 	// Wait for GPU to finish processing the current frame (Wait for fence, reset command allocator, etc.)
     void WaitForGpu();

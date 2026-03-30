@@ -2,6 +2,44 @@
 #include "D3D12RenderContext.h"
 #include "D3D12ApplicationHelper.h"
 
+#pragma comment(lib, "Windowscodecs.lib")
+
+namespace
+{
+	bool SaveBufferAsPng(
+		ID3D12Resource* readbackBuffer,
+		const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint,
+		UINT width,
+		UINT height,
+		const std::wstring& filePath)
+	{
+		BYTE* mappedData = nullptr;
+		const CD3DX12_RANGE readRange(0, static_cast<SIZE_T>(footprint.Footprint.RowPitch) * height);
+		if (FAILED(readbackBuffer->Map(0, &readRange, reinterpret_cast<void**>(&mappedData))))
+		{
+			return false;
+		}
+
+     const DirectX::Image image = {
+			width,
+			height,
+			DXGI_FORMAT_R8G8B8A8_UNORM,
+			footprint.Footprint.RowPitch,
+			static_cast<SIZE_T>(footprint.Footprint.RowPitch) * height,
+			mappedData
+		};
+
+		const HRESULT hr = DirectX::SaveToWICFile(
+			image,
+			DirectX::WIC_FLAGS_NONE,
+			GetWICCodec(WIC_CODEC_PNG),
+			filePath.c_str());
+
+		readbackBuffer->Unmap(0, nullptr);
+     return SUCCEEDED(hr);
+	}
+}
+
 D3D12RenderContext::D3D12RenderContext(UINT width, UINT height) :
 	m_width(width),
 	m_height(height),
@@ -223,8 +261,51 @@ void D3D12RenderContext::Prepare()
 	m_commandList->ResourceBarrier(1, &barrier);
 }
 
-void D3D12RenderContext::Present()
+bool D3D12RenderContext::Present(const std::wstring& capturePath)
 {
+   const bool captureRequested = !capturePath.empty();
+	ComPtr<ID3D12Resource> readbackBuffer;
+	D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+
+	if (captureRequested)
+	{
+		const D3D12_RESOURCE_DESC renderTargetDesc = m_renderTargets[m_frameIndex]->GetDesc();
+		UINT64 readbackBufferSize = 0;
+		m_device->GetCopyableFootprints(&renderTargetDesc, 0, 1, 0, &footprint, nullptr, nullptr, &readbackBufferSize);
+
+		ThrowIfFailed(m_device->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK),
+			D3D12_HEAP_FLAG_NONE,
+			&CD3DX12_RESOURCE_DESC::Buffer(readbackBufferSize),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			nullptr,
+			IID_PPV_ARGS(&readbackBuffer)));
+
+		auto toCopySource = CD3DX12_RESOURCE_BARRIER::Transition(
+			m_renderTargets[m_frameIndex].Get(),
+			D3D12_RESOURCE_STATE_RENDER_TARGET,
+			D3D12_RESOURCE_STATE_COPY_SOURCE);
+		m_commandList->ResourceBarrier(1, &toCopySource);
+
+		D3D12_TEXTURE_COPY_LOCATION destination = {};
+		destination.pResource = readbackBuffer.Get();
+		destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+		destination.PlacedFootprint = footprint;
+
+		D3D12_TEXTURE_COPY_LOCATION source = {};
+		source.pResource = m_renderTargets[m_frameIndex].Get();
+		source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+		source.SubresourceIndex = 0;
+
+		m_commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+
+		auto backToRenderTarget = CD3DX12_RESOURCE_BARRIER::Transition(
+			m_renderTargets[m_frameIndex].Get(),
+			D3D12_RESOURCE_STATE_COPY_SOURCE,
+			D3D12_RESOURCE_STATE_RENDER_TARGET);
+		m_commandList->ResourceBarrier(1, &backToRenderTarget);
+	}
+
 	// Transition from RENDER_TARGET to PRESENT state for the current back buffer
 	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
@@ -240,8 +321,21 @@ void D3D12RenderContext::Present()
 	// Present the frame
 	ThrowIfFailed(m_swapChain->Present(1, 0));
 
+	bool captureSucceeded = true;
+	if (captureRequested)
+	{
+		WaitForGpu();
+		captureSucceeded = SaveBufferAsPng(
+			readbackBuffer.Get(),
+			footprint,
+			m_width,
+			m_height,
+			capturePath);
+	}
+
 	// Signal and increment the fence value for the current frame
 	MoveToNextFrame();
+   return captureSucceeded;
 }
 
 // Prepare to render the next frame.
