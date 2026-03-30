@@ -13,6 +13,7 @@
 #define IDI_SMALL				108
 #define IDC_ZENITH			109
 #define IDC_MYICON				2
+#define IDM_FILE_LOAD_MODEL	32771
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1
 #endif

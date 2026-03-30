@@ -3,6 +3,30 @@
 #include "Win32Application.h"
 #include "D3D12ApplicationHelper.h"
 
+#pragma comment(lib, "Comdlg32.lib")
+
+namespace
+{
+	std::string WideToUtf8(const std::wstring& value)
+	{
+		if (value.empty())
+		{
+			return {};
+		}
+
+		const int requiredSize = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), -1, nullptr, 0, nullptr, nullptr);
+     if (requiredSize <= 1)
+		{
+			return {};
+		}
+
+		std::vector<char> buffer(static_cast<size_t>(requiredSize));
+		WideCharToMultiByte(CP_UTF8, 0, value.c_str(), -1, buffer.data(), requiredSize, nullptr, nullptr);
+
+       return std::string(buffer.data());
+	}
+}
+
 ZenithRenderEngine::ZenithRenderEngine(UINT width, UINT height, std::wstring name) :
 	D3D12Application(width, height, name),
 	m_model(nullptr),
@@ -25,17 +49,41 @@ void ZenithRenderEngine::OnInit()
 	CreateRootSignature();
 	CreatePipelineState();
 	CreateSceneDataConstantBuffer();
+}
 
-	// Load Model
-	auto device = m_renderContext->GetDevice();
+bool ZenithRenderEngine::OnCommand(UINT commandId)
+{
+	switch (commandId)
+	{
+	case IDM_FILE_LOAD_MODEL:
+	{
+		wchar_t filePath[MAX_PATH] = {};
+		OPENFILENAMEW openFileName = {};
+		openFileName.lStructSize = sizeof(openFileName);
+		openFileName.hwndOwner = Win32Application::GetHwnd();
+		openFileName.lpstrFile = filePath;
+		openFileName.nMaxFile = _countof(filePath);
+		openFileName.lpstrFilter = L"3D Model Files\0*.obj;*.fbx;*.dae;*.gltf;*.glb;*.3ds;*.stl;*.ply\0All Files\0*.*\0\0";
+		openFileName.nFilterIndex = 1;
+		openFileName.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
 
-	m_renderContext->BeginUpload();
-	auto commandList = m_renderContext->GetCommandList();
-	m_model = std::make_unique<Model>(device, commandList, "Assets/Models/backpack.obj");
-	m_renderContext->EndUpload();
+		if (GetOpenFileNameW(&openFileName))
+		{
+			LoadModelFromPath(filePath);
+		}
 
-	// GPU is done with the upload — release staging buffers and CPU data immediately
-	m_model->ReleaseUploadBuffers();
+		return true;
+}
+	case IDM_ABOUT:
+		MessageBoxW(
+			Win32Application::GetHwnd(),
+			L"Zenith\nDirect3D 12 model viewer\n\nUse Files > Load Model to open a supported 3D asset.",
+			GetTitle(),
+			MB_OK | MB_ICONINFORMATION);
+		return true;
+	default:
+		return false;
+	}
 }
 
 void ZenithRenderEngine::CreateRootSignature()
@@ -164,6 +212,33 @@ void ZenithRenderEngine::CreateSceneDataConstantBuffer()
 	CD3DX12_RANGE readRange(0, 0); // Chúng ta không đọc từ GPU
 	ThrowIfFailed(m_sceneDataConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pSceneDataCbvDataBegin)));
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
+}
+
+void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
+{
+	if (path.empty())
+	{
+		return;
+	}
+
+	m_renderContext->WaitForGpu();
+	m_model.reset();
+
+	auto device = m_renderContext->GetDevice();
+	m_renderContext->BeginUpload();
+	auto commandList = m_renderContext->GetCommandList();
+	auto model = std::make_unique<Model>(device, commandList, WideToUtf8(path));
+	m_renderContext->EndUpload();
+
+	if (!model->IsLoaded())
+	{
+		MessageBoxW(Win32Application::GetHwnd(), L"Failed to load the selected model.", GetTitle(), MB_OK | MB_ICONERROR);
+		return;
+	}
+
+	model->ReleaseUploadBuffers();
+	m_model = std::move(model);
+	SetCustomWindowText(path.c_str());
 }
 
 void ZenithRenderEngine::OnUpdate(const Timer& timer)

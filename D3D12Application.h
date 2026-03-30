@@ -19,6 +19,7 @@ public:
     // Window & Input
     virtual void OnKeyDown(UINT8 /*key*/) {}
     virtual void OnKeyUp(UINT8 /*key*/) {}
+    virtual bool OnCommand(UINT /*commandId*/) { return false; }
 
     // Accessors
     UINT GetWidth() const { return m_width; }

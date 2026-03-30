@@ -13,6 +13,7 @@ public:
     virtual void OnUpdate(const Timer& timer) override;
     virtual void OnRender(const Timer& timer) override;
     virtual void OnDestroy() override;
+    virtual bool OnCommand(UINT commandId) override;
 
 private:
     // Here we will load the pipeline state, root signature, and any assets (like shaders, textures, etc.)
@@ -47,4 +48,5 @@ private:
     void CreateRootSignature();
     void CreatePipelineState();
     void CreateSceneDataConstantBuffer();
+    void LoadModelFromPath(const std::wstring& path);
 };

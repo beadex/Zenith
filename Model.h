@@ -10,6 +10,7 @@ public:
 
 	// Draw the model using the provided command list
 	void Draw(ID3D12GraphicsCommandList* commandList);
+	bool IsLoaded() const { return !m_meshes.empty(); }
 
 	void ReleaseUploadBuffers();
 

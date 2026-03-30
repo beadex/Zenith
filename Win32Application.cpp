@@ -5,6 +5,24 @@ HWND Win32Application::m_hWnd = nullptr;
 Timer Win32Application::m_timer = Timer();
 bool Win32Application::m_appPaused = false;
 
+HMENU Win32Application::CreateApplicationMenu()
+{
+	HMENU menuBar = CreateMenu();
+	HMENU fileMenu = CreatePopupMenu();
+	HMENU helpMenu = CreatePopupMenu();
+
+	AppendMenu(fileMenu, MF_STRING, IDM_FILE_LOAD_MODEL, L"Load Model...");
+	AppendMenu(fileMenu, MF_SEPARATOR, 0, nullptr);
+	AppendMenu(fileMenu, MF_STRING, IDM_EXIT, L"Exit");
+
+	AppendMenu(helpMenu, MF_STRING, IDM_ABOUT, L"About");
+
+	AppendMenu(menuBar, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"Files");
+	AppendMenu(menuBar, MF_POPUP, reinterpret_cast<UINT_PTR>(helpMenu), L"Help");
+
+	return menuBar;
+}
+
 int Win32Application::Run(D3D12Application* pApp, HINSTANCE hInstance, int nCmdShow) {
 	int argc;
 
@@ -24,8 +42,9 @@ int Win32Application::Run(D3D12Application* pApp, HINSTANCE hInstance, int nCmdS
 
 	// Create the window's client area and adjust the window size accordingly.
 	// NOTE: No fullscreen support
+	HMENU menuBar = CreateApplicationMenu();
 	RECT windowRect = { 0, 0, static_cast<LONG>(pApp->GetWidth()), static_cast<LONG>(pApp->GetHeight()) };
-	AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+	AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, TRUE);
 
 	// Create the window and store a handle to it.
 	m_hWnd = CreateWindow(
@@ -37,7 +56,7 @@ int Win32Application::Run(D3D12Application* pApp, HINSTANCE hInstance, int nCmdS
 		windowRect.right - windowRect.left,
 		windowRect.bottom - windowRect.top,
 		nullptr,        // We have no parent window.
-		nullptr,        // We aren't using menus.
+		menuBar,
 		hInstance,
 		pApp);
 
@@ -122,6 +141,22 @@ LRESULT CALLBACK Win32Application::WndProc(HWND hWnd, UINT message, WPARAM wPara
 			pApp->OnKeyUp(static_cast<UINT8>(wParam));
 		}
 		return 0;
+
+	case WM_COMMAND:
+	{
+		const UINT commandId = LOWORD(wParam);
+		if (commandId == IDM_EXIT)
+		{
+			DestroyWindow(hWnd);
+			return 0;
+		}
+
+		if (pApp && pApp->OnCommand(commandId))
+		{
+			return 0;
+		}
+	}
+	break;
 
 	case WM_ENTERSIZEMOVE:
 		m_appPaused = true;

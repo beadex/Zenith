@@ -15,5 +15,6 @@ protected:
 
 	static bool m_appPaused;
 private:
+	static HMENU CreateApplicationMenu();
 	static HWND m_hWnd;
 };
