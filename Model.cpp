@@ -40,12 +40,22 @@ void Model::LoadModel(const std::string& path)
 {
 	Assimp::Importer importer;
 
-	// Read file with optimization flags: Triangulate, FlipUVs
+	// Read file with optimization flags
 	const aiScene* scene = importer.ReadFile(path,
+		aiProcess_CalcTangentSpace |
+		aiProcess_JoinIdenticalVertices |
 		aiProcess_Triangulate |
-		aiProcess_FlipUVs |
-		aiProcess_JoinIdenticalVertices |  // Merges duplicate verts (reduces VRAM)
-		aiProcess_GenSmoothNormals);       // Ensures normals exist);
+		aiProcess_RemoveComponent |
+		aiProcess_GenSmoothNormals |
+		aiProcess_SplitLargeMeshes |
+		aiProcess_ValidateDataStructure |
+		aiProcess_RemoveRedundantMaterials |
+		aiProcess_SortByPType |
+		aiProcess_FindInvalidData |
+		aiProcess_GenUVCoords |
+		aiProcess_TransformUVCoords |
+		aiProcess_OptimizeMeshes |
+		aiProcess_OptimizeGraph);
 
 	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode)
 	{
