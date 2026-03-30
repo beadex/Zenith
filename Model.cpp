@@ -45,6 +45,7 @@ void Model::LoadModel(const std::string& path)
 		aiProcess_CalcTangentSpace |
 		aiProcess_JoinIdenticalVertices |
 		aiProcess_Triangulate |
+		aiProcess_FlipUVs |
 		aiProcess_RemoveComponent |
 		aiProcess_GenSmoothNormals |
 		aiProcess_SplitLargeMeshes |
