@@ -276,7 +276,7 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 	// Update camera (smoothing / spring hook – currently instant)
 	m_camera.Update();
 
-	// --- Scene transform (model slowly rotates for visual interest) ---
+	// --- Scene transform ---
 	const XMMATRIX translate = XMMatrixTranslation(
 		0.0f,
 		0.0f,

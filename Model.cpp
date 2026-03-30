@@ -2,12 +2,10 @@
 #include "Model.h"
 #include "D3D12ApplicationHelper.h"
 
-#include <algorithm>
-
 using namespace DirectX;
 
 Model::Model(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
-   m_boundsMin(FLT_MAX, FLT_MAX, FLT_MAX),
+	m_boundsMin(FLT_MAX, FLT_MAX, FLT_MAX),
 	m_boundsMax(-FLT_MAX, -FLT_MAX, -FLT_MAX),
 	m_device(device),
 	m_commandList(commandList)
@@ -44,13 +42,12 @@ void Model::LoadModel(const std::string& path)
 {
 	Assimp::Importer importer;
 
-	// Read file with optimization flags
-	const aiScene* scene = importer.ReadFile(path,
+	unsigned int importFlags =
 		aiProcess_CalcTangentSpace |
 		aiProcess_JoinIdenticalVertices |
 		aiProcess_Triangulate |
 		aiProcess_PreTransformVertices |
-		aiProcess_FlipUVs |
+		aiProcess_ConvertToLeftHanded |
 		aiProcess_RemoveComponent |
 		aiProcess_GenSmoothNormals |
 		aiProcess_SplitLargeMeshes |
@@ -61,7 +58,10 @@ void Model::LoadModel(const std::string& path)
 		aiProcess_GenUVCoords |
 		aiProcess_TransformUVCoords |
 		aiProcess_OptimizeMeshes |
-		aiProcess_OptimizeGraph);
+		aiProcess_OptimizeGraph;
+
+	// Read file with optimization flags
+	const aiScene* scene = importer.ReadFile(path, importFlags);
 
 	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode)
 	{
