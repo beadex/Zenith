@@ -118,14 +118,6 @@
       <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>d3d12.dll</DelayLoadDLLs>
     </Link>
-    <CustomBuildStep>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuildStep>
-    <CustomBuild>
-      <Command>copy %(Identity) "$(OutDir)" &gt; NUL</Command>
-      <Outputs>$(OutDir)\%(Identity)</Outputs>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuild>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -145,14 +137,6 @@
       <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>d3d12.dll</DelayLoadDLLs>
     </Link>
-    <CustomBuildStep>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuildStep>
-    <CustomBuild>
-      <Command>copy %(Identity) "$(OutDir)" &gt; NUL</Command>
-      <Outputs>$(OutDir)\%(Identity)</Outputs>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuild>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -170,14 +154,6 @@
       <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>d3d12.dll</DelayLoadDLLs>
     </Link>
-    <CustomBuildStep>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuildStep>
-    <CustomBuild>
-      <Command>copy %(Identity) "$(OutDir)" &gt; NUL</Command>
-      <Outputs>$(OutDir)\%(Identity)</Outputs>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuild>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
     <ClCompile>
@@ -195,14 +171,6 @@
       <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>d3d12.dll</DelayLoadDLLs>
     </Link>
-    <CustomBuildStep>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuildStep>
-    <CustomBuild>
-      <Command>copy %(Identity) "$(OutDir)" &gt; NUL</Command>
-      <Outputs>$(OutDir)\%(Identity)</Outputs>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuild>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -222,14 +190,6 @@
       <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>d3d12.dll</DelayLoadDLLs>
     </Link>
-    <CustomBuildStep>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuildStep>
-    <CustomBuild>
-      <Command>copy %(Identity) "$(OutDir)" &gt; NUL</Command>
-      <Outputs>$(OutDir)\%(Identity)</Outputs>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuild>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
     <ClCompile>
@@ -249,14 +209,6 @@
       <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;dxguid.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>d3d12.dll</DelayLoadDLLs>
     </Link>
-    <CustomBuildStep>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuildStep>
-    <CustomBuild>
-      <Command>copy %(Identity) "$(OutDir)" &gt; NUL</Command>
-      <Outputs>$(OutDir)\%(Identity)</Outputs>
-      <TreatOutputAsContent>true</TreatOutputAsContent>
-    </CustomBuild>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="D3D12Application.h" />
@@ -339,12 +291,5 @@ dxc.exe -nologo -Tps_6_0 -E"PSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_P
     <Error Condition="!Exists('packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props'))" />
     <Error Condition="!Exists('packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets'))" />
     <Error Condition="!Exists('packages\directxtex_desktop_win10.2025.10.28.1\build\native\directxtex_desktop_win10.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\directxtex_desktop_win10.2025.10.28.1\build\native\directxtex_desktop_win10.targets'))" />
-  </Target>
-  <Target Name="CopyAssets" AfterTargets="Build">
-    <ItemGroup>
-      <AssetsFiles Include="Assets\**\*.*" />
-    </ItemGroup>
-    <MakeDir Directories="$(OutDir)Assets" />
-    <Copy SourceFiles="@(AssetsFiles)" DestinationFiles="@(AssetsFiles->'$(OutDir)%(Identity)')" />
   </Target>
 </Project>
