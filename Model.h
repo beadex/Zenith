@@ -7,7 +7,8 @@ class Model
 {
 public:
 	// Constructor to initialize the model with a file path to the model data
-	Model(DescriptorAllocator* descriptorAllocator, ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path);
+	Model(CbvSrvUavAllocator* descriptorAllocator, ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path);
+	~Model();
 
 	// Draw the model using the provided command list
 	void Draw(ID3D12GraphicsCommandList* commandList);
@@ -26,7 +27,7 @@ private:
 	XMFLOAT3 m_boundsCenter = XMFLOAT3(0.0f, 0.0f, 0.0f);
 	float m_boundsRadius = 0.0f;
 	std::string m_directory;
-	DescriptorAllocator* m_descriptorAllocator;
+	CbvSrvUavAllocator* m_descriptorAllocator;
 	ID3D12Device* m_device;
 	ID3D12GraphicsCommandList* m_commandList;
 

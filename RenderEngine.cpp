@@ -396,7 +396,6 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 	}
 
 	m_renderContext->WaitForGpu();
-	m_renderContext->GetDescriptorAllocator()->ResetStaticDescriptors();
 	m_model.reset();
 	m_modelOffset = XMFLOAT3(0.0f, 0.0f, 0.0f);
 

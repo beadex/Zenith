@@ -160,19 +160,12 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 
 	// Create descriptor heap for render target views (RTVs)
 	{
-		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-		rtvHeapDesc.NumDescriptors = FrameCount;
-		rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-		rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-		ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
+        m_rtvHeap = std::make_unique<RenderTargetAllocator>(FrameCount);
+		m_rtvHeap->Initialize(m_device.Get());
+		m_rtvDescriptorSize = m_rtvHeap->GetDescriptorSize();
 
-		m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
-		D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
-		dsvHeapDesc.NumDescriptors = 1;
-		dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-		dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-		ThrowIfFailed(m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_dsvHeap)));
+		m_dsvHeap = std::make_unique<DepthStencilAllocator>(1);
+		m_dsvHeap->Initialize(m_device.Get());
 
 		D3D12_RESOURCE_DESC depthDesc = {};
 		depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -197,23 +190,20 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 			IID_PPV_ARGS(&m_depthBuffer)
 		));
 
-		m_device->CreateDepthStencilView(m_depthBuffer.Get(), nullptr, m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+        m_device->CreateDepthStencilView(m_depthBuffer.Get(), nullptr, m_dsvHeap->GetCpuHandle(0));
 
-		m_dsvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+		m_dsvDescriptorSize = m_dsvHeap->GetDescriptorSize();
 
-		m_descriptorAllocator = std::make_unique<DescriptorAllocator>(FrameCount);
+      m_descriptorAllocator = std::make_unique<CbvSrvUavAllocator>(FrameCount);
 		m_descriptorAllocator->Initialize(m_device.Get());
 	}
 
 	// Create render target views (RTVs) for each frame in the swap chain
 	{
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
-
 		for (UINT n = 0; n < FrameCount; n++)
 		{
 			ThrowIfFailed(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])));
-			m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvHandle);
-			rtvHandle.Offset(1, m_rtvDescriptorSize);
+         m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, m_rtvHeap->GetCpuHandle(n));
 
 			ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n])));
 		}

@@ -4,7 +4,7 @@
 
 using namespace DirectX;
 
-Model::Model(DescriptorAllocator* descriptorAllocator, ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
+Model::Model(CbvSrvUavAllocator* descriptorAllocator, ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
 	m_boundsMin(FLT_MAX, FLT_MAX, FLT_MAX),
 	m_boundsMax(-FLT_MAX, -FLT_MAX, -FLT_MAX),
 	m_descriptorAllocator(descriptorAllocator),
@@ -12,6 +12,19 @@ Model::Model(DescriptorAllocator* descriptorAllocator, ID3D12Device* device, ID3
 	m_commandList(commandList)
 {
 	LoadModel(path);
+}
+
+Model::~Model()
+{
+	if (!m_descriptorAllocator)
+	{
+		return;
+	}
+
+	for (const auto& [_, slot] : m_textureCache)
+	{
+		m_descriptorAllocator->ReleaseStaticDescriptor(slot);
+	}
 }
 
 void Model::Draw(ID3D12GraphicsCommandList* commandList)
