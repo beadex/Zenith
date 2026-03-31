@@ -28,8 +28,17 @@ private:
 	// Pipeline objects
 	CD3DX12_VIEWPORT m_viewport;
 	CD3DX12_RECT m_scissorRect;
+	// Beginner-friendly shadow tuning values.
+	//
+	// These are kept here so the first shadow-map implementation can be tuned in
+	// one place instead of hunting through PSO creation and shader upload code.
+	static constexpr INT ShadowRasterDepthBias = 1000;
+	static constexpr float ShadowRasterSlopeScaledDepthBias = 1.0f;
+	static constexpr float ShadowComparisonBias = 0.0015f;
+	static constexpr float ShadowMinFrustumPadding = 1.0f;
+	static constexpr float ShadowDepthRangePaddingScale = 0.5f;
 
-    // The renderer now keeps four model PSOs instead of one so it can route each
+	// The renderer now keeps four model PSOs instead of one so it can route each
 	// mesh by two independent material properties:
 	//   1. opaque vs. transparent
 	//   2. single-sided vs. double-sided
@@ -42,6 +51,10 @@ private:
 	ComPtr<ID3D12PipelineState> m_transparentPipelineState;
 	ComPtr<ID3D12PipelineState> m_doubleSidedTransparentPipelineState;
 	ComPtr<ID3D12PipelineState> m_gridPipelineState;
+	// These two PSOs are used only for the shadow pass.
+	  // They render depth from the light's point of view, not color to the screen.
+	ComPtr<ID3D12PipelineState> m_shadowPipelineState;
+	ComPtr<ID3D12PipelineState> m_doubleSidedShadowPipelineState;
 
 	std::unique_ptr<Model> m_model;
 
@@ -57,6 +70,11 @@ private:
 	ComPtr<ID3D12Resource> m_sceneDataConstantBuffer;
 	SceneDataConstantBuffer m_sceneDataCbData;
 	UINT8* m_pSceneDataCbvDataBegin;
+	// Separate SceneData for the shadow pass. It uses the same model transform but
+	   // different view/projection matrices because the camera is the light.
+	ComPtr<ID3D12Resource> m_shadowSceneDataConstantBuffer;
+	SceneDataConstantBuffer m_shadowSceneDataCbData;
+	UINT8* m_pShadowSceneDataCbvDataBegin;
 	std::wstring m_pendingRenderImagePath;
 	XMFLOAT3 m_modelOffset = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
@@ -69,6 +87,17 @@ private:
 	ComPtr<ID3D12Resource> m_gridVertexBuffer;
 	D3D12_VERTEX_BUFFER_VIEW m_gridVertexBufferView{};
 	UINT m_gridVertexCount = 0;
+	// Optional solid plane used to make shadows easier to see than on a line grid.
+	ComPtr<ID3D12Resource> m_groundPlaneVertexBuffer;
+	D3D12_VERTEX_BUFFER_VIEW m_groundPlaneVertexBufferView{};
+	UINT m_groundPlaneVertexCount = 0;
+	ComPtr<ID3D12Resource> m_groundPlaneSceneDataConstantBuffer;
+	SceneDataConstantBuffer m_groundPlaneSceneDataCbData;
+	UINT8* m_pGroundPlaneSceneDataCbvDataBegin = nullptr;
+	ComPtr<ID3D12Resource> m_groundPlaneMaterialConstantBuffer;
+	MaterialData m_groundPlaneMaterialData;
+	UINT8* m_pGroundPlaneMaterialCbvDataBegin = nullptr;
+	bool m_useSolidGroundPlane = false;
 
 	struct DirectionalLightData
 	{
@@ -82,7 +111,15 @@ private:
 	{
 		DirectionalLightData directionalLight;
 		XMFLOAT4 viewPosition;
-		float padding[44];
+		// Main-pass pixels are transformed into this light clip space so they can
+		   // look themselves up in the shadow map.
+		XMFLOAT4X4 lightViewProjection;
+		// x = shadow map SRV index
+		  // y = depth bias used during comparison
+		  // z = reserved for future tuning
+		  // w = 1 when directional light/shadows are enabled
+		XMFLOAT4 shadowParams;
+		float padding[24];
 	};
 	static_assert((sizeof(LightingDataConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
 
@@ -100,9 +137,15 @@ private:
 	void CreateTransparentPipelineState();
 	void CreateDoubleSidedTransparentPipelineState();
 	void CreateGridPipelineState();
+	void CreateShadowPipelineState();
+	void CreateDoubleSidedShadowPipelineState();
 	void CreateSceneDataConstantBuffer();
+	void CreateShadowSceneDataConstantBuffer();
 	void CreateLightingDataConstantBuffer();
 	void CreateGridVertexBuffer(float radius = 10.0f);
+	void CreateGroundPlaneVertexBuffer(float radius = 10.0f);
+	void CreateGroundPlaneSceneDataConstantBuffer();
+	void CreateGroundPlaneMaterialConstantBuffer();
 	void LoadModelFromPath(const std::wstring& path);
 	void UpdateLightingMenuState() const;
 };

@@ -10,6 +10,10 @@ class D3D12RenderContext
 public:
 	// FrameCount thường là 2 cho Double Buffering hoặc 3 cho Triple Buffering
 	static const UINT FrameCount = 2;
+    // The first shadow-mapping step uses one fixed-size depth texture.
+	//
+	// Bigger values -> sharper shadows but more GPU cost.
+	// Smaller values -> blurrier / more jagged shadows but cheaper.
 	static const UINT ShadowMapWidth = 2048;
 	static const UINT ShadowMapHeight = 2048;
 
@@ -54,16 +58,22 @@ public:
 		return m_descriptorManager->GetDsvAllocator()->GetCpuHandle(0);
 	}
 	UINT GetDsvDescriptorSize() const { return m_dsvDescriptorSize; };
+ // Slot 0 in the DSV heap is the normal camera depth buffer used by the main pass.
 	D3D12_CPU_DESCRIPTOR_HANDLE GetMainDepthDsv() const { return m_descriptorManager->GetDsvAllocator()->GetCpuHandle(0); }
+ // Slot 1 in the DSV heap is the shadow map depth buffer used by the light pass.
 	D3D12_CPU_DESCRIPTOR_HANDLE GetShadowMapDsv() const { return m_descriptorManager->GetDsvAllocator()->GetCpuHandle(1); }
 	CbvSrvUavAllocator* GetCbvSrvUavAllocator() const { return m_descriptorManager->GetCbvSrvUavAllocator(); }
 	RenderTargetAllocator* GetRtvAllocator() const { return m_descriptorManager->GetRtvAllocator(); }
 	DepthStencilAllocator* GetDsvAllocator() const { return m_descriptorManager->GetDsvAllocator(); }
 	UINT Get4xMsaaQuality() const { return m_4xMsaaQuality; }
+  // The shadow map is rendered as depth, then sampled later like a texture.
 	ID3D12Resource* GetShadowMap() const { return m_shadowMap.Get(); }
+   // This is the SRV slot index copied into the shader-visible heap each frame.
 	UINT GetShadowMapSrvIndex() const { return m_shadowMapSrvIndex; }
 	D3D12_CPU_DESCRIPTOR_HANDLE GetShadowMapSrvCpuHandle() const { return m_descriptorManager->GetCbvSrvUavAllocator()->GetStaticCpuHandle(m_shadowMapSrvIndex); }
 	D3D12_GPU_DESCRIPTOR_HANDLE GetShadowMapSrvGpuHandle() const { return m_descriptorManager->GetCbvSrvUavAllocator()->GetDynamicGpuHandle(m_shadowMapSrvIndex); }
+   // Shadow rendering uses its own viewport/scissor because the shadow map size
+	// is independent from the window size.
 	const CD3DX12_VIEWPORT& GetShadowMapViewport() const { return m_shadowViewport; }
 	const CD3DX12_RECT& GetShadowMapScissorRect() const { return m_shadowScissorRect; }
 
@@ -86,6 +96,8 @@ private:
 	UINT m_rtvDescriptorSize;
 	UINT m_dsvDescriptorSize;
 	ComPtr<ID3D12Resource> m_depthBuffer;
+ // Dedicated depth texture that stores the scene as seen from the light.
+	// The main pass later samples this to decide whether a pixel is shadowed.
 	ComPtr<ID3D12Resource> m_shadowMap;
 	ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
 	ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
@@ -93,7 +105,9 @@ private:
 	std::unique_ptr<DescriptorManager> m_descriptorManager;
 	UINT m_4xMsaaQuality = 0;
 	DXGI_FORMAT m_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    // Static SRV slot for the shadow map in the descriptor allocator.
 	UINT m_shadowMapSrvIndex = UINT_MAX;
+  // These describe the rasterization area when rendering from the light.
 	CD3DX12_VIEWPORT m_shadowViewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(ShadowMapWidth), static_cast<float>(ShadowMapHeight));
 	CD3DX12_RECT m_shadowScissorRect = CD3DX12_RECT(0, 0, static_cast<LONG>(ShadowMapWidth), static_cast<LONG>(ShadowMapHeight));
 

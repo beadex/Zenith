@@ -44,6 +44,13 @@ struct LightingData
 {
     DirectionalLightData directionalLight;
     float4 viewPos;
+    // Used to convert a world-space point from the main pass into the light's clip space.
+    float4x4 lightViewProjection;
+    // x = shadow map descriptor index in gTextures[]
+    // y = depth bias
+    // z = reserved
+    // w = 1 when shadowing is enabled
+    float4 shadowParams;
 };
 ConstantBuffer<LightingData> lightingData : register(b2);
 
@@ -73,6 +80,12 @@ struct PSInput
     float2 uv : TEXCOORD;
 };
 
+struct ShadowPSInput
+{
+    float4 position : SV_POSITION;
+    float2 uv : TEXCOORD;
+};
+
 struct GridVSInput
 {
     float3 position : POSITION;
@@ -88,6 +101,7 @@ struct GridPSInput
 float4 SampleDiffuse(float2 uv);
 float SampleOpacity(float2 uv);
 float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv);
+float ComputeShadowVisibility(float3 worldPos);
 
 // ============================================================
 // Vertex Shader
@@ -137,7 +151,8 @@ float4 PSMain(PSInput input) : SV_TARGET
         opacity = 1.0f;
     }
 
-    float3 result = CalcDirLight(lightingData.directionalLight, norm, viewDir, input.uv);
+    float shadow = ComputeShadowVisibility(input.worldPos);
+    float3 result = CalcDirLight(lightingData.directionalLight, norm, viewDir, input.uv) * shadow;
 
     const float gamma = 2.2f;
     float3 gammaCorrected = pow(saturate(result), 1.0f / gamma);
@@ -188,6 +203,56 @@ float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, f
     return ambient + diffuse + specular;
 }
 
+float ComputeShadowVisibility(float3 worldPos)
+{
+    if (lightingData.shadowParams.w < 0.5f)
+    {
+        return 1.0f;
+    }
+
+    // Reproject the current main-pass pixel into the light's clip space.
+    float4 lightClipPos = mul(float4(worldPos, 1.0f), lightingData.lightViewProjection);
+    if (lightClipPos.w <= 0.0f)
+    {
+        return 1.0f;
+    }
+
+    // Convert from clip/NDC space into texture UV space.
+    float3 shadowPos = lightClipPos.xyz / lightClipPos.w;
+    float2 shadowUv = float2(shadowPos.x * 0.5f + 0.5f, shadowPos.y * -0.5f + 0.5f);
+
+    if (shadowUv.x < 0.0f || shadowUv.x > 1.0f || shadowUv.y < 0.0f || shadowUv.y > 1.0f || shadowPos.z < 0.0f || shadowPos.z > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    uint shadowMapIndex = (uint)lightingData.shadowParams.x;
+    uint shadowMapWidth = 0;
+    uint shadowMapHeight = 0;
+    gTextures[shadowMapIndex].GetDimensions(shadowMapWidth, shadowMapHeight);
+
+    // PCF = Percentage Closer Filtering.
+    // Instead of one hard compare, sample a small 3x3 neighborhood and average.
+    // This makes shadow edges look softer and less jagged.
+    float2 texelSize = 1.0f / float2(shadowMapWidth, shadowMapHeight);
+    float currentDepth = shadowPos.z - lightingData.shadowParams.y;
+    float litSampleCount = 0.0f;
+
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            float2 sampleUv = saturate(shadowUv + float2(x, y) * texelSize);
+            float shadowDepth = gTextures[shadowMapIndex].Sample(g_sampler, sampleUv).r;
+            litSampleCount += (currentDepth <= shadowDepth) ? 1.0f : 0.0f;
+        }
+    }
+
+    return lerp(0.25f, 1.0f, litSampleCount / 9.0f);
+}
+
 GridPSInput GridVSMain(GridVSInput input)
 {
     GridPSInput output;
@@ -202,4 +267,27 @@ GridPSInput GridVSMain(GridVSInput input)
 float4 GridPSMain(GridPSInput input) : SV_TARGET
 {
     return float4(input.color, 1.0f);
+}
+
+ShadowPSInput ShadowVSMain(VSInput input)
+{
+    // The shadow pass only needs vertex positions transformed by the light camera.
+    // For alpha-mask materials, UVs are also forwarded so the shadow pixel shader
+    // can discard transparent texels before depth is written.
+    ShadowPSInput output;
+    float4 worldPos = mul(float4(input.position, 1.0f), sceneData.model);
+    output.position = mul(mul(worldPos, sceneData.view), sceneData.projection);
+    output.uv = input.uv;
+    return output;
+}
+
+void ShadowPSMain(ShadowPSInput input)
+{
+    // Mask materials should cast cutout shadows that match their visible shape.
+    // Opaque materials simply fall through and write depth normally.
+    if (materialData.alphaMode == ALPHA_MODE_MASK)
+    {
+        float opacity = SampleDiffuse(input.uv).a * SampleOpacity(input.uv);
+        clip(opacity - materialData.alphaCutoff);
+    }
 }

@@ -81,16 +81,28 @@ void ZenithRenderEngine::OnInit()
 	   // These are the "engine state" objects that usually live for most of the
 	   // program: root signature, PSOs, persistent upload buffers, and the grid.
 	CreateRootSignature();
-  // The renderer now creates four model PSOs so meshes can be dispatched by the
-	// combination of transparency and double-sided state.
+	// The renderer now creates four model PSOs so meshes can be dispatched by the
+	  // combination of transparency and double-sided state.
 	CreatePipelineState();
 	CreateDoubleSidedPipelineState();
 	CreateTransparentPipelineState();
 	CreateDoubleSidedTransparentPipelineState();
 	CreateGridPipelineState();
 	CreateSceneDataConstantBuffer();
+	// The shadow pass needs its own SceneData buffer because its camera is the light,
+	  // not the user's view camera.
+	CreateShadowSceneDataConstantBuffer();
+	// The optional inspection plane also gets its own SceneData because it does not
+	   // use the model's translated world transform.
+	CreateGroundPlaneSceneDataConstantBuffer();
 	CreateLightingDataConstantBuffer();
+	// Shadow PSOs are depth-only render states used before the main color pass.
+	CreateShadowPipelineState();
+	CreateDoubleSidedShadowPipelineState();
 	CreateGridVertexBuffer();
+	// This plane is only for debugging / viewing shadows better.
+	CreateGroundPlaneVertexBuffer();
+	CreateGroundPlaneMaterialConstantBuffer();
 	UpdateLightingMenuState();
 }
 
@@ -148,6 +160,12 @@ bool ZenithRenderEngine::OnCommand(UINT commandId)
 		m_directionalLightEnabled = !m_directionalLightEnabled;
 		UpdateLightingMenuState();
 		return true;
+	case IDM_VIEW_SOLID_GROUND_PLANE:
+		// Swap the visual helper from a wire grid to a solid plane.
+		   // The plane makes it much easier to judge whether shadows look correct.
+		m_useSolidGroundPlane = !m_useSolidGroundPlane;
+		UpdateLightingMenuState();
+		return true;
 	default:
 		return false;
 	}
@@ -165,6 +183,10 @@ void ZenithRenderEngine::UpdateLightingMenuState() const
 		menu,
 		IDM_VIEW_DIRECTIONAL_LIGHT,
 		MF_BYCOMMAND | (m_directionalLightEnabled ? MF_CHECKED : MF_UNCHECKED));
+	CheckMenuItem(
+		menu,
+		IDM_VIEW_SOLID_GROUND_PLANE,
+		MF_BYCOMMAND | (m_useSolidGroundPlane ? MF_CHECKED : MF_UNCHECKED));
 	DrawMenuBar(Win32Application::GetHwnd());
 }
 
@@ -287,11 +309,104 @@ void ZenithRenderEngine::CreatePipelineState()
 	psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
 	psoDesc.DepthStencilState.StencilEnable = FALSE;
 
-   // Main PSO: opaque + single-sided.
+	// Main PSO: opaque + single-sided.
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)));
 
 	free(pVertexShaderData);
 	free(pPixelShaderData);
+}
+
+void ZenithRenderEngine::CreateShadowPipelineState()
+{
+	auto device = m_renderContext->GetDevice();
+	UINT8* pVertexShaderData = nullptr;
+    UINT8* pPixelShaderData = nullptr;
+	UINT vertexShaderDataLength = 0;
+	UINT pixelShaderDataLength = 0;
+
+	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_ShadowVSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength));
+	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_ShadowPSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength));
+
+	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+	psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
+	psoDesc.pRootSignature = m_rootSignature.Get();
+	psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
+   psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
+	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	psoDesc.RasterizerState.DepthBias = ShadowRasterDepthBias;
+	psoDesc.RasterizerState.SlopeScaledDepthBias = ShadowRasterSlopeScaledDepthBias;
+	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+	psoDesc.SampleMask = UINT_MAX;
+	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	// This PSO has no pixel shader and no render targets because the shadow pass
+	 // only writes depth into the shadow map.
+	psoDesc.NumRenderTargets = 0;
+	psoDesc.SampleDesc.Count = 1;
+	psoDesc.SampleDesc.Quality = 0;
+	psoDesc.DepthStencilState.DepthEnable = TRUE;
+	psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+	psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+	psoDesc.DepthStencilState.StencilEnable = FALSE;
+
+	// A small depth bias helps reduce "shadow acne" caused by limited depth precision.
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_shadowPipelineState)));
+
+	free(pVertexShaderData);
+   free(pPixelShaderData);
+}
+
+void ZenithRenderEngine::CreateDoubleSidedShadowPipelineState()
+{
+	auto device = m_renderContext->GetDevice();
+	UINT8* pVertexShaderData = nullptr;
+    UINT8* pPixelShaderData = nullptr;
+	UINT vertexShaderDataLength = 0;
+	UINT pixelShaderDataLength = 0;
+
+	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_ShadowVSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength));
+	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_ShadowPSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength));
+
+	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+	psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
+	psoDesc.pRootSignature = m_rootSignature.Get();
+	psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
+   psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
+	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	// Same idea as the main shadow PSO, but culling is disabled for double-sided meshes.
+	psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	psoDesc.RasterizerState.DepthBias = ShadowRasterDepthBias;
+	psoDesc.RasterizerState.SlopeScaledDepthBias = ShadowRasterSlopeScaledDepthBias;
+	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+	psoDesc.SampleMask = UINT_MAX;
+	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	psoDesc.NumRenderTargets = 0;
+	psoDesc.SampleDesc.Count = 1;
+	psoDesc.SampleDesc.Quality = 0;
+	psoDesc.DepthStencilState.DepthEnable = TRUE;
+	psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+	psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+	psoDesc.DepthStencilState.StencilEnable = FALSE;
+
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_doubleSidedShadowPipelineState)));
+
+	free(pVertexShaderData);
+   free(pPixelShaderData);
 }
 
 void ZenithRenderEngine::CreateTransparentPipelineState()
@@ -342,7 +457,7 @@ void ZenithRenderEngine::CreateTransparentPipelineState()
 	transparentBlend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
 	transparentBlend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
-    // Transparent PSO: transparent + single-sided.
+	// Transparent PSO: transparent + single-sided.
 	// Depth testing stays enabled, but depth writes are disabled so multiple
 	// transparent layers can still contribute when drawn back-to-front.
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_transparentPipelineState)));
@@ -390,7 +505,7 @@ void ZenithRenderEngine::CreateDoubleSidedPipelineState()
 	psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
 	psoDesc.DepthStencilState.StencilEnable = FALSE;
 
-    // Double-sided opaque PSO: same as the main opaque PSO except culling is off.
+	// Double-sided opaque PSO: same as the main opaque PSO except culling is off.
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_doubleSidedPipelineState)));
 
 	free(pVertexShaderData);
@@ -446,7 +561,7 @@ void ZenithRenderEngine::CreateDoubleSidedTransparentPipelineState()
 	transparentBlend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
 	transparentBlend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
- // Double-sided transparent PSO: transparent + no culling.
+	// Double-sided transparent PSO: transparent + no culling.
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_doubleSidedTransparentPipelineState)));
 
 	free(pVertexShaderData);
@@ -519,6 +634,24 @@ void ZenithRenderEngine::CreateSceneDataConstantBuffer()
 	CD3DX12_RANGE readRange(0, 0);
 	ThrowIfFailed(m_sceneDataConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pSceneDataCbvDataBegin)));
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
+}
+
+void ZenithRenderEngine::CreateShadowSceneDataConstantBuffer()
+{
+	auto device = m_renderContext->GetDevice();
+	UINT constantBufferSize = (sizeof(SceneDataConstantBuffer) + 255) & ~255;
+
+	ThrowIfFailed(device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(constantBufferSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&m_shadowSceneDataConstantBuffer)));
+
+	CD3DX12_RANGE readRange(0, 0);
+	ThrowIfFailed(m_shadowSceneDataConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pShadowSceneDataCbvDataBegin)));
+	memcpy(m_pShadowSceneDataCbvDataBegin, &m_shadowSceneDataCbData, sizeof(m_shadowSceneDataCbData));
 }
 
 void ZenithRenderEngine::CreateLightingDataConstantBuffer()
@@ -595,6 +728,83 @@ void ZenithRenderEngine::CreateGridVertexBuffer(float radius)
 	m_gridVertexBufferView.SizeInBytes = bufferSize;
 }
 
+void ZenithRenderEngine::CreateGroundPlaneVertexBuffer(float radius)
+{
+	// Build a simple two-triangle quad at y = 0 so shadows have a solid receiver.
+	const float extent = (std::max)(10.0f, radius * 1.5f);
+	const Vertex vertices[] = {
+		{ XMFLOAT3(-extent, 0.0f, -extent), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT2(0.0f, 0.0f) },
+		{ XMFLOAT3(-extent, 0.0f,  extent), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT2(0.0f, 1.0f) },
+		{ XMFLOAT3(extent, 0.0f,  extent), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT2(1.0f, 1.0f) },
+		{ XMFLOAT3(-extent, 0.0f, -extent), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT2(0.0f, 0.0f) },
+		{ XMFLOAT3(extent, 0.0f,  extent), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT2(1.0f, 1.0f) },
+		{ XMFLOAT3(extent, 0.0f, -extent), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT2(1.0f, 0.0f) },
+	};
+
+	m_groundPlaneVertexCount = _countof(vertices);
+	const UINT bufferSize = sizeof(vertices);
+	auto device = m_renderContext->GetDevice();
+
+	ThrowIfFailed(device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(bufferSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&m_groundPlaneVertexBuffer)));
+
+	UINT8* mappedData = nullptr;
+	CD3DX12_RANGE readRange(0, 0);
+	ThrowIfFailed(m_groundPlaneVertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&mappedData)));
+	memcpy(mappedData, vertices, bufferSize);
+	m_groundPlaneVertexBuffer->Unmap(0, nullptr);
+
+	m_groundPlaneVertexBufferView.BufferLocation = m_groundPlaneVertexBuffer->GetGPUVirtualAddress();
+	m_groundPlaneVertexBufferView.StrideInBytes = sizeof(Vertex);
+	m_groundPlaneVertexBufferView.SizeInBytes = bufferSize;
+}
+
+void ZenithRenderEngine::CreateGroundPlaneSceneDataConstantBuffer()
+{
+	auto device = m_renderContext->GetDevice();
+	UINT constantBufferSize = (sizeof(SceneDataConstantBuffer) + 255) & ~255;
+
+	ThrowIfFailed(device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(constantBufferSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&m_groundPlaneSceneDataConstantBuffer)));
+
+	CD3DX12_RANGE readRange(0, 0);
+	ThrowIfFailed(m_groundPlaneSceneDataConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pGroundPlaneSceneDataCbvDataBegin)));
+	memcpy(m_pGroundPlaneSceneDataCbvDataBegin, &m_groundPlaneSceneDataCbData, sizeof(m_groundPlaneSceneDataCbData));
+}
+
+void ZenithRenderEngine::CreateGroundPlaneMaterialConstantBuffer()
+{
+	auto device = m_renderContext->GetDevice();
+	const UINT constantBufferSize = (sizeof(MaterialData) + 255) & ~255;
+
+	ThrowIfFailed(device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(constantBufferSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&m_groundPlaneMaterialConstantBuffer)));
+
+	CD3DX12_RANGE readRange(0, 0);
+	ThrowIfFailed(m_groundPlaneMaterialConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pGroundPlaneMaterialCbvDataBegin)));
+
+	// The plane is intentionally simple: no textures, just a constant gray tint.
+	m_groundPlaneMaterialData = {};
+	m_groundPlaneMaterialData.alphaMode = 0;
+	m_groundPlaneMaterialData.baseColorFactor = XMFLOAT4(0.55f, 0.55f, 0.55f, 1.0f);
+	memcpy(m_pGroundPlaneMaterialCbvDataBegin, &m_groundPlaneMaterialData, sizeof(m_groundPlaneMaterialData));
+}
+
 void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 {
 	if (path.empty())
@@ -633,6 +843,7 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 	m_modelOffset = XMFLOAT3(-boundsCenter.x, -boundsMin.y, -boundsCenter.z);
 	m_camera.FrameBoundingSphere(XMFLOAT3(0.0f, boundsCenter.y - boundsMin.y, 0.0f), boundsRadius);
 	CreateGridVertexBuffer(boundsRadius);
+	CreateGroundPlaneVertexBuffer(boundsRadius);
 	model->ReleaseUploadBuffers();
 	m_model = std::move(model);
 	SetCustomWindowText(path.c_str());
@@ -657,6 +868,90 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 	const XMMATRIX view = m_camera.GetViewMatrix();
 	const XMMATRIX proj = m_camera.GetProjectionMatrix();
 	const XMMATRIX normalMat = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
+	// Build a simple directional-light camera for shadow mapping.
+	 //
+	 // Think of this as placing a second camera in the world:
+	 //   - the normal camera renders what the player sees
+	 //   - the light camera renders what the light sees
+	const XMFLOAT3 directionalLightDirection = XMFLOAT3(-0.2f, -1.0f, -0.3f);
+
+	XMFLOAT3 shadowTarget = XMFLOAT3(0.0f, 0.0f, 0.0f);
+	float shadowBoundsRadius = 15.0f;
+	XMFLOAT3 shadowBoundsMin = XMFLOAT3(-shadowBoundsRadius, 0.0f, -shadowBoundsRadius);
+	XMFLOAT3 shadowBoundsMax = XMFLOAT3(shadowBoundsRadius, shadowBoundsRadius * 2.0f, shadowBoundsRadius);
+	if (m_model)
+	{
+		const XMFLOAT3 boundsCenter = m_model->GetBoundsCenter();
+		const XMFLOAT3 boundsMin = m_model->GetBoundsMin();
+		const XMFLOAT3 boundsMax = m_model->GetBoundsMax();
+		shadowTarget = XMFLOAT3(0.0f, boundsCenter.y - boundsMin.y, 0.0f);
+		shadowBoundsRadius = (std::max)(m_model->GetBoundsRadius(), 1.0f);
+		shadowBoundsMin = XMFLOAT3(
+			boundsMin.x + m_modelOffset.x,
+			boundsMin.y + m_modelOffset.y,
+			boundsMin.z + m_modelOffset.z);
+		shadowBoundsMax = XMFLOAT3(
+			boundsMax.x + m_modelOffset.x,
+			boundsMax.y + m_modelOffset.y,
+			boundsMax.z + m_modelOffset.z);
+	}
+
+	const XMVECTOR lightDirection = XMVector3Normalize(XMLoadFloat3(&directionalLightDirection));
+	const XMVECTOR shadowTargetVector = XMLoadFloat3(&shadowTarget);
+	XMVECTOR lightUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	if (fabsf(XMVectorGetX(XMVector3Dot(lightDirection, lightUp))) > 0.99f)
+	{
+		lightUp = XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f);
+	}
+
+	const XMVECTOR lightPosition = shadowTargetVector - lightDirection * (shadowBoundsRadius * 2.5f);
+	const XMMATRIX lightView = XMMatrixLookAtLH(lightPosition, shadowTargetVector, lightUp);
+
+	// Fit the orthographic shadow camera to the model's transformed bounds in light space.
+	// This uses the shadow-map texels more efficiently than a loose radius-based box.
+	const XMFLOAT3 shadowCorners[] = {
+		XMFLOAT3(shadowBoundsMin.x, shadowBoundsMin.y, shadowBoundsMin.z),
+		XMFLOAT3(shadowBoundsMin.x, shadowBoundsMin.y, shadowBoundsMax.z),
+		XMFLOAT3(shadowBoundsMin.x, shadowBoundsMax.y, shadowBoundsMin.z),
+		XMFLOAT3(shadowBoundsMin.x, shadowBoundsMax.y, shadowBoundsMax.z),
+		XMFLOAT3(shadowBoundsMax.x, shadowBoundsMin.y, shadowBoundsMin.z),
+		XMFLOAT3(shadowBoundsMax.x, shadowBoundsMin.y, shadowBoundsMax.z),
+		XMFLOAT3(shadowBoundsMax.x, shadowBoundsMax.y, shadowBoundsMin.z),
+		XMFLOAT3(shadowBoundsMax.x, shadowBoundsMax.y, shadowBoundsMax.z)
+	};
+
+	float minLightX = FLT_MAX;
+	float minLightY = FLT_MAX;
+	float minLightZ = FLT_MAX;
+	float maxLightX = -FLT_MAX;
+	float maxLightY = -FLT_MAX;
+	float maxLightZ = -FLT_MAX;
+	for (const XMFLOAT3& corner : shadowCorners)
+	{
+		const XMVECTOR lightSpaceCorner = XMVector3TransformCoord(XMLoadFloat3(&corner), lightView);
+		const float lightX = XMVectorGetX(lightSpaceCorner);
+		const float lightY = XMVectorGetY(lightSpaceCorner);
+		const float lightZ = XMVectorGetZ(lightSpaceCorner);
+		minLightX = (std::min)(minLightX, lightX);
+		minLightY = (std::min)(minLightY, lightY);
+		minLightZ = (std::min)(minLightZ, lightZ);
+		maxLightX = (std::max)(maxLightX, lightX);
+		maxLightY = (std::max)(maxLightY, lightY);
+		maxLightZ = (std::max)(maxLightZ, lightZ);
+	}
+
+	const float xyPadding = (std::max)(ShadowMinFrustumPadding, shadowBoundsRadius * 0.15f);
+	const float zPadding = (std::max)(ShadowMinFrustumPadding * 4.0f, shadowBoundsRadius * ShadowDepthRangePaddingScale);
+	const float nearPlane = (std::max)(0.1f, minLightZ - zPadding);
+	const float farPlane = (std::max)(nearPlane + 1.0f, maxLightZ + zPadding);
+	const XMMATRIX lightProjection = XMMatrixOrthographicOffCenterLH(
+		minLightX - xyPadding,
+		maxLightX + xyPadding,
+		minLightY - xyPadding,
+		maxLightY + xyPadding,
+		nearPlane,
+		farPlane);
+	const XMMATRIX lightViewProjection = lightView * lightProjection;
 
 	// HLSL constant buffers are treated as column-major here, so the matrices are
 	  // transposed before upload to match shader-side multiplication.
@@ -664,10 +959,19 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 	XMStoreFloat4x4(&m_sceneDataCbData.view, XMMatrixTranspose(view));
 	XMStoreFloat4x4(&m_sceneDataCbData.projection, XMMatrixTranspose(proj));
 	XMStoreFloat4x4(&m_sceneDataCbData.normalMatrix, normalMat);
+	// The ground plane stays at the origin instead of using the model recenter offset.
+	XMStoreFloat4x4(&m_groundPlaneSceneDataCbData.model, XMMatrixTranspose(XMMatrixIdentity()));
+	XMStoreFloat4x4(&m_groundPlaneSceneDataCbData.view, XMMatrixTranspose(view));
+	XMStoreFloat4x4(&m_groundPlaneSceneDataCbData.projection, XMMatrixTranspose(proj));
+	XMStoreFloat4x4(&m_groundPlaneSceneDataCbData.normalMatrix, XMMatrixTranspose(XMMatrixIdentity()));
+	XMStoreFloat4x4(&m_shadowSceneDataCbData.model, XMMatrixTranspose(world));
+	XMStoreFloat4x4(&m_shadowSceneDataCbData.view, XMMatrixTranspose(lightView));
+	XMStoreFloat4x4(&m_shadowSceneDataCbData.projection, XMMatrixTranspose(lightProjection));
+	XMStoreFloat4x4(&m_shadowSceneDataCbData.normalMatrix, normalMat);
 
 	XMStoreFloat4(&m_lightingDataCbData.viewPosition, m_camera.GetPosition());
 
-	m_lightingDataCbData.directionalLight.direction = XMFLOAT4(-0.2f, -1.0f, -0.3f, 1.0f);
+	m_lightingDataCbData.directionalLight.direction = XMFLOAT4(directionalLightDirection.x, directionalLightDirection.y, directionalLightDirection.z, 1.0f);
 	if (m_directionalLightEnabled)
 	{
 		m_lightingDataCbData.directionalLight.ambient = XMFLOAT4(0.2f, 0.2f, 0.2f, 1.0f);
@@ -681,9 +985,20 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 		m_lightingDataCbData.directionalLight.specular = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
 	}
 
+	// This matrix is the bridge between the main pass and the shadow map.
+	   // Each main-pass pixel transforms itself into this light space to test shadowing.
+	XMStoreFloat4x4(&m_lightingDataCbData.lightViewProjection, XMMatrixTranspose(lightViewProjection));
+	m_lightingDataCbData.shadowParams = XMFLOAT4(
+		static_cast<float>(m_renderContext->GetShadowMapSrvIndex()),
+		ShadowComparisonBias,
+		1.0f,
+		m_directionalLightEnabled ? 1.0f : 0.0f);
+
 	// Because both constant buffers live in persistently mapped UPLOAD heaps,
 	// updating them is just a memcpy into the mapped CPU pointer.
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
+	memcpy(m_pGroundPlaneSceneDataCbvDataBegin, &m_groundPlaneSceneDataCbData, sizeof(m_groundPlaneSceneDataCbData));
+	memcpy(m_pShadowSceneDataCbvDataBegin, &m_shadowSceneDataCbData, sizeof(m_shadowSceneDataCbData));
 	memcpy(m_pLightingDataCbvDataBegin, &m_lightingDataCbData, sizeof(m_lightingDataCbData));
 }
 
@@ -705,8 +1020,21 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 	auto device = m_renderContext->GetDevice();
 	auto cbvSrvUavAllocator = m_renderContext->GetCbvSrvUavAllocator();
+	const UINT shadowSceneDescriptorIndex = cbvSrvUavAllocator->AllocateDynamicDescriptor();
+	const UINT groundPlaneSceneDescriptorIndex = cbvSrvUavAllocator->AllocateDynamicDescriptor();
 	const UINT sceneDescriptorIndex = cbvSrvUavAllocator->AllocateDynamicDescriptor();
 	const UINT lightingDescriptorIndex = cbvSrvUavAllocator->AllocateDynamicDescriptor();
+	// The shadow pass uses its own SceneData descriptor because it renders from the light.
+	D3D12_CONSTANT_BUFFER_VIEW_DESC shadowSceneCbvDesc = {};
+	shadowSceneCbvDesc.BufferLocation = m_shadowSceneDataConstantBuffer->GetGPUVirtualAddress();
+	shadowSceneCbvDesc.SizeInBytes = (sizeof(SceneDataConstantBuffer) + 255) & ~255;
+	device->CreateConstantBufferView(&shadowSceneCbvDesc, cbvSrvUavAllocator->GetDynamicCpuHandle(shadowSceneDescriptorIndex));
+	// The ground plane also has separate SceneData because its world transform differs
+	 // from the model's transform.
+	D3D12_CONSTANT_BUFFER_VIEW_DESC groundPlaneSceneCbvDesc = {};
+	groundPlaneSceneCbvDesc.BufferLocation = m_groundPlaneSceneDataConstantBuffer->GetGPUVirtualAddress();
+	groundPlaneSceneCbvDesc.SizeInBytes = (sizeof(SceneDataConstantBuffer) + 255) & ~255;
+	device->CreateConstantBufferView(&groundPlaneSceneCbvDesc, cbvSrvUavAllocator->GetDynamicCpuHandle(groundPlaneSceneDescriptorIndex));
 	D3D12_CONSTANT_BUFFER_VIEW_DESC sceneCbvDesc = {};
 	sceneCbvDesc.BufferLocation = m_sceneDataConstantBuffer->GetGPUVirtualAddress();
 	sceneCbvDesc.SizeInBytes = (sizeof(SceneDataConstantBuffer) + 255) & ~255;
@@ -721,14 +1049,49 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	ID3D12DescriptorHeap* descriptorHeaps[] = { cbvSrvUavAllocator->GetShaderVisibleHeap() };
 	commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 	commandList->SetGraphicsRootDescriptorTable(0, cbvSrvUavAllocator->GetDynamicGpuHandle(0));
-	commandList->SetGraphicsRootDescriptorTable(1, cbvSrvUavAllocator->GetDynamicGpuHandle(sceneDescriptorIndex));
-	commandList->SetGraphicsRootDescriptorTable(3, cbvSrvUavAllocator->GetDynamicGpuHandle(lightingDescriptorIndex));
 
 	// 3. At this point all root bindings needed by the shaders are in place:
 	//   slot 0 -> texture SRV table
 	//   slot 1 -> scene CBV table
 	//   slot 2 -> material root CBV (set later per mesh)
 	//   slot 3 -> lighting CBV table
+	if (m_model)
+	{
+		// --- Shadow pass ---
+		   // 1. Turn the shadow map from a sampled texture into a writable depth target.
+		auto shadowToDepthWrite = CD3DX12_RESOURCE_BARRIER::Transition(
+			m_renderContext->GetShadowMap(),
+			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+			D3D12_RESOURCE_STATE_DEPTH_WRITE);
+		commandList->ResourceBarrier(1, &shadowToDepthWrite);
+
+		const D3D12_CPU_DESCRIPTOR_HANDLE shadowDsvHandle = m_renderContext->GetShadowMapDsv();
+		// 2. Bind the light's camera matrices, shadow viewport, and shadow DSV.
+		commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+		commandList->SetGraphicsRootDescriptorTable(1, cbvSrvUavAllocator->GetDynamicGpuHandle(shadowSceneDescriptorIndex));
+		commandList->RSSetViewports(1, &m_renderContext->GetShadowMapViewport());
+		commandList->RSSetScissorRects(1, &m_renderContext->GetShadowMapScissorRect());
+		commandList->ClearDepthStencilView(shadowDsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+		commandList->OMSetRenderTargets(0, nullptr, FALSE, &shadowDsvHandle);
+
+		// 3. Render opaque geometry from the light's point of view.
+		   //    The result is depth only, stored in the shadow map.
+		commandList->SetPipelineState(m_shadowPipelineState.Get());
+		m_model->DrawOpaque(commandList, false);
+		commandList->SetPipelineState(m_doubleSidedShadowPipelineState.Get());
+		m_model->DrawOpaque(commandList, true);
+
+		// 4. Turn the shadow map back into a shader-readable texture for the main pass.
+		auto shadowToPixelShaderResource = CD3DX12_RESOURCE_BARRIER::Transition(
+			m_renderContext->GetShadowMap(),
+			D3D12_RESOURCE_STATE_DEPTH_WRITE,
+			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		commandList->ResourceBarrier(1, &shadowToPixelShaderResource);
+	}
+
+	commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+	commandList->SetGraphicsRootDescriptorTable(1, cbvSrvUavAllocator->GetDynamicGpuHandle(sceneDescriptorIndex));
+	commandList->SetGraphicsRootDescriptorTable(3, cbvSrvUavAllocator->GetDynamicGpuHandle(lightingDescriptorIndex));
 
 	// 4. Set up scissor rect and viewport
 	commandList->RSSetViewports(1, &m_viewport);
@@ -749,18 +1112,32 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-	// Draw grid first so the viewer has visual orientation even before a model is loaded.
-	commandList->SetPipelineState(m_gridPipelineState.Get());
-	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
-	commandList->IASetVertexBuffers(0, 1, &m_gridVertexBufferView);
-	commandList->DrawInstanced(m_gridVertexCount, 1, 0, 0);
+	if (m_useSolidGroundPlane)
+	{
+		// Draw the debugging ground plane with the normal lit shader so it receives shadows.
+		commandList->SetPipelineState(m_doubleSidedPipelineState.Get());
+		commandList->SetGraphicsRootDescriptorTable(1, cbvSrvUavAllocator->GetDynamicGpuHandle(groundPlaneSceneDescriptorIndex));
+		commandList->SetGraphicsRootConstantBufferView(2, m_groundPlaneMaterialConstantBuffer->GetGPUVirtualAddress());
+		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		commandList->IASetVertexBuffers(0, 1, &m_groundPlaneVertexBufferView);
+		commandList->DrawInstanced(m_groundPlaneVertexCount, 1, 0, 0);
+		commandList->SetGraphicsRootDescriptorTable(1, cbvSrvUavAllocator->GetDynamicGpuHandle(sceneDescriptorIndex));
+	}
+	else
+	{
+		// Draw grid first so the viewer has visual orientation even before a model is loaded.
+		commandList->SetPipelineState(m_gridPipelineState.Get());
+		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+		commandList->IASetVertexBuffers(0, 1, &m_gridVertexBufferView);
+		commandList->DrawInstanced(m_gridVertexCount, 1, 0, 0);
+	}
 
 	// Opaque meshes render first so they fill depth normally.
 	commandList->SetPipelineState(m_pipelineState.Get());
 
 	// 6. Draw the model
 	if (m_model) {
-        // Draw order matters:
+		// Draw order matters:
 		//   1. opaque single-sided
 		//   2. opaque double-sided
 		//   3. transparent single-sided
