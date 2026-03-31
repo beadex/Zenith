@@ -10,26 +10,27 @@ public:
 	Model(CbvSrvUavAllocator* descriptorAllocator, ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path);
 	~Model();
 
-  // Rendering is split into four buckets:
-	//   - opaque single-sided
-	//   - opaque double-sided
-	//   - transparent single-sided
-	//   - transparent double-sided
-	//
-	// The caller selects which bucket to draw by passing the desired flags.
+	// Rendering is split into four buckets:
+	  //   - opaque single-sided
+	  //   - opaque double-sided
+	  //   - transparent single-sided
+	  //   - transparent double-sided
+	  //
+	  // The caller selects which bucket to draw by passing the desired flags.
 	void DrawOpaque(ID3D12GraphicsCommandList* commandList, bool doubleSided);
 	void DrawTransparent(ID3D12GraphicsCommandList* commandList, const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset, bool doubleSided);
 	bool IsLoaded() const { return !m_meshes.empty(); }
 
 	void ReleaseUploadBuffers();
 	XMFLOAT3 GetBoundsMin() const { return m_boundsMin; }
+	XMFLOAT3 GetBoundsMax() const { return m_boundsMax; }
 	XMFLOAT3 GetBoundsCenter() const { return m_boundsCenter; }
 	float GetBoundsRadius() const { return m_boundsRadius; }
 private:
 	std::unordered_map<std::string, UINT> m_textureCache;
-   // Stores whether a texture actually uses transparency, not just whether its
-	// format happens to contain an alpha channel. This keeps opaque RGBA textures
-	// out of the transparent pass.
+	// Stores whether a texture actually uses transparency, not just whether its
+	 // format happens to contain an alpha channel. This keeps opaque RGBA textures
+	 // out of the transparent pass.
 	std::unordered_map<std::string, bool> m_textureTransparencyCache;
 	std::unordered_set<std::string> m_loadedPaths;
 	std::vector<Mesh> m_meshes;
