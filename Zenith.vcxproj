@@ -278,14 +278,16 @@ dxc.exe -nologo -Tps_6_0 -E"ShadowPSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filen
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(Identity)</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Identity)</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">dxc.exe -nologo -Tvs_6_0 -E"VSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_VSMain.cso" "%(FullPath)"
-dxc.exe -nologo -Tps_6_0 -E"PSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_PSMain.cso" "%(FullPath)" dxc.exe -nologo -Tvs_6_0 -E"GridVSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_GridVSMain.cso" "%(FullPath)"
+dxc.exe -nologo -Tps_6_0 -E"PSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_PSMain.cso" "%(FullPath)"
+dxc.exe -nologo -Tvs_6_0 -E"GridVSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_GridVSMain.cso" "%(FullPath)"
 dxc.exe -nologo -Tps_6_0 -E"GridPSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_GridPSMain.cso" "%(FullPath)"
- dxc.exe -nologo -Tvs_6_0 -E"ShadowVSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_ShadowVSMain.cso" "%(FullPath)"
+dxc.exe -nologo -Tvs_6_0 -E"ShadowVSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_ShadowVSMain.cso" "%(FullPath)"
 dxc.exe -nologo -Tps_6_0 -E"ShadowPSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_ShadowPSMain.cso" "%(FullPath)"</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">dxc.exe -nologo -Tvs_6_0 -E"VSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_VSMain.cso" "%(FullPath)"
-dxc.exe -nologo -Tps_6_0 -E"PSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_PSMain.cso" "%(FullPath)" dxc.exe -nologo -Tvs_6_0 -E"GridVSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_GridVSMain.cso" "%(FullPath)"
+dxc.exe -nologo -Tps_6_0 -E"PSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_PSMain.cso" "%(FullPath)"
+dxc.exe -nologo -Tvs_6_0 -E"GridVSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_GridVSMain.cso" "%(FullPath)"
 dxc.exe -nologo -Tps_6_0 -E"GridPSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_GridPSMain.cso" "%(FullPath)"
- dxc.exe -nologo -Tvs_6_0 -E"ShadowVSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_ShadowVSMain.cso" "%(FullPath)"
+dxc.exe -nologo -Tvs_6_0 -E"ShadowVSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_ShadowVSMain.cso" "%(FullPath)"
 dxc.exe -nologo -Tps_6_0 -E"ShadowPSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_ShadowPSMain.cso" "%(FullPath)"</Command>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">$(OutDir)%(Filename)_VSMain.cso;$(OutDir)%(Filename)_PSMain.cso;$(OutDir)%(Filename)_GridVSMain.cso;$(OutDir)%(Filename)_GridPSMain.cso;$(OutDir)%(Filename)_ShadowVSMain.cso;$(OutDir)%(Filename)_ShadowPSMain.cso</Outputs>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">$(OutDir)%(Filename)_VSMain.cso;$(OutDir)%(Filename)_PSMain.cso;$(OutDir)%(Filename)_GridVSMain.cso;$(OutDir)%(Filename)_GridPSMain.cso;$(OutDir)%(Filename)_ShadowVSMain.cso;$(OutDir)%(Filename)_ShadowPSMain.cso</Outputs>
