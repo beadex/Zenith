@@ -96,6 +96,9 @@ struct VSInput
     float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD;
+    // Tangent-space basis imported from the mesh. These are not used directly as
+    // lighting normals; instead they describe how to rotate a sampled normal-map
+    // vector out of tangent space and into world space.
     float3 tangent : TANGENT;
     float3 bitangent : BINORMAL;
 };
@@ -130,6 +133,8 @@ struct GridPSInput
 
 float4 SampleDiffuse(float2 uv);
 float SampleOpacity(float2 uv);
+// If a normal map exists, this helper reconstructs the final lighting normal by
+// sampling the tangent-space texture and transforming it through the TBN basis.
 float3 SampleNormal(float2 uv, float3 normal, float3 tangent, float3 bitangent);
 
 // For the beginner shadow implementation, it helps to keep direct-light pieces
@@ -155,6 +160,8 @@ PSInput VSMain(VSInput input)
 
     float4 worldPos = mul(float4(input.position, 1.0f), sceneData.model);
     vout.worldPos = worldPos.xyz;
+    // The same normal matrix is used for the whole tangent basis so the pixel
+    // shader receives all three vectors in a consistent space.
     vout.normal = normalize(mul(input.normal, (float3x3) sceneData.normalMatrix));
     vout.tangent = normalize(mul(input.tangent, (float3x3) sceneData.normalMatrix));
     vout.bitangent = normalize(mul(input.bitangent, (float3x3) sceneData.normalMatrix));
@@ -239,11 +246,16 @@ float3 SampleNormal(float2 uv, float3 normal, float3 tangent, float3 bitangent)
 {
     float3 norm = normalize(normal);
 
+    // Materials without a normal map simply use the interpolated mesh normal,
+    // which keeps old assets behaving exactly as they did before this feature.
     if (materialData.numNormal == 0)
     {
         return norm;
     }
 
+    // Re-orthogonalize the tangent basis in the shader. Imported tangent data is
+    // often close to correct but not perfectly orthogonal after interpolation.
+    // Cleaning it up here gives a more stable TBN basis per pixel.
     float3 t = tangent - norm * dot(tangent, norm);
     float tangentLengthSq = dot(t, t);
     if (tangentLengthSq < 1e-6f)
@@ -264,7 +276,12 @@ float3 SampleNormal(float2 uv, float3 normal, float3 tangent, float3 bitangent)
         b *= rsqrt(bitangentLengthSq);
     }
 
+    // Normal maps are stored in texture space as 0..1 values, so they must be
+    // unpacked back into the signed -1..1 vector range before lighting.
     float3 normalSample = gTextures[materialData.normalStartIndex].Sample(g_sampler, uv).xyz * 2.0f - 1.0f;
+    // Some tools export tangent space with the opposite green-channel convention.
+    // The renderer passes +1 or -1 through shadowParams.z so this one line can
+    // support either convention without changing the asset.
     normalSample.y *= lightingData.shadowParams.z;
     float3x3 tbn = float3x3(t, b, norm);
     return normalize(mul(normalSample, tbn));

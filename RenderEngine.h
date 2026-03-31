@@ -37,6 +37,9 @@ private:
 	static constexpr float ShadowComparisonBias = 0.0015f;
 	static constexpr float ShadowMinFrustumPadding = 1.0f;
 	static constexpr float ShadowDepthRangePaddingScale = 0.5f;
+    // Different tools disagree about whether the normal-map green channel points
+	// "up" or "down" in tangent space. Flipping this lets the renderer support
+	// the opposite convention without re-exporting the asset.
 	static constexpr bool FlipNormalMapGreenChannel = false;
 
 	// The renderer now keeps four model PSOs instead of one so it can route each
@@ -64,6 +67,9 @@ private:
 		XMFLOAT4X4 model;
 		XMFLOAT4X4 view;
 		XMFLOAT4X4 projection;
+        // This is the inverse-transpose used to transform direction vectors such as
+		// normals, tangents, and bitangents. Using the plain model matrix here would
+		// be wrong once non-uniform scale is introduced.
 		XMFLOAT4X4 normalMatrix;
 	};
 	static_assert((sizeof(SceneDataConstantBuffer) % 256) == 0, "Constant Buffer size must be 256-byte aligned");
@@ -117,7 +123,7 @@ private:
 		XMFLOAT4X4 lightViewProjection;
 		// x = shadow map SRV index
 		  // y = depth bias used during comparison
-	   // z = normal-map green channel sign (+1 or -1)
+        // z = normal-map green channel sign (+1 or -1)
 		  // w = 1 when directional light/shadows are enabled
 		XMFLOAT4 shadowParams;
 		float padding[24];

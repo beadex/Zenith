@@ -8,6 +8,11 @@ struct Vertex
 	XMFLOAT3 Position;
 	XMFLOAT3 Normal;
 	XMFLOAT2 TexCoord;
+   // Tangent-space basis used by normal mapping.
+	//
+	// The normal map stores a small "local" normal in tangent space, not directly
+	// in model/world space. Tangent and bitangent tell the shader how to rotate
+	// that sampled normal into the same space as the lighting calculations.
 	XMFLOAT3 Tangent;
 	XMFLOAT3 Bitangent;
 };
@@ -18,11 +23,15 @@ struct MaterialData
 	UINT diffuseStartIndex = 0;
 	UINT specularStartIndex = 0;
 	UINT opacityStartIndex = 0;
+  // Normal maps are optional. When present, this points at the first normal-map
+	// descriptor copied into the shader-visible heap for the frame.
 	UINT normalStartIndex = 0;
 	// Texture counts let the shader know whether a given texture type exists.
 	UINT numDiffuse = 0;
 	UINT numSpecular = 0;
 	UINT numOpacity = 0;
+ // Kept as a count instead of a bool so the shader side follows the same pattern
+	// for every texture class: if count > 0, sampling is allowed.
 	UINT numNormal = 0;
 	// glTF alpha handling:
 	   //   0 = OPAQUE
@@ -31,12 +40,16 @@ struct MaterialData
 	UINT alphaMode = 0;
 	// Used only by glTF MASK materials.
 	float alphaCutoff = 0.5f;
+    // Explicit padding keeps the C++ struct layout aligned with the HLSL constant
+	// buffer packing rules. Without this, later fields would no longer line up.
 	XMFLOAT2 padding = XMFLOAT2(0.0f, 0.0f);
 	// Base color factor is the lightweight way this sample now respects glTF
 	// material tint and alpha without implementing a full PBR shading model.
 	XMFLOAT4 baseColorFactor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 };
 
+// The shader reads the same MaterialData layout from a constant buffer, so this
+// offset check protects against accidental C++/HLSL drift during future edits.
 static_assert(offsetof(MaterialData, baseColorFactor) == 48, "MaterialData must match HLSL packing.");
 
 struct Texture {

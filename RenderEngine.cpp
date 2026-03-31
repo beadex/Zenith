@@ -297,7 +297,17 @@ void ZenithRenderEngine::CreatePipelineState()
 	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_VSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength));
 	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_PSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength));
 
-	// 2. Định nghĩa Input Layout
+    // This must exactly match the `Vertex` struct in `Mesh.h`.
+	//
+	// Offsets:
+	//   0  -> position
+	//   12 -> normal
+	//   24 -> uv
+	//   32 -> tangent
+	//   44 -> bitangent
+	//
+	// The last two entries are the extra tangent-space data needed by the shader
+	// to turn a sampled normal-map vector into a world-space lighting normal.
 	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },

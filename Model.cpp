@@ -69,6 +69,9 @@ namespace
 
 		if (texture.type == "texture_normal")
 		{
+			// Normal maps store vector data, not color. If they are sampled through an
+			 // sRGB SRV, the GPU gamma-decodes them and bends the reconstructed normal.
+			 // For normal data we always want the linear variant of the format.
 			format = DirectX::MakeLinear(format);
 		}
 
@@ -161,6 +164,8 @@ void Model::LoadModel(const std::string& path)
 		aiProcess_Triangulate |
 		aiProcess_PreTransformVertices |
 		aiProcess_ConvertToLeftHanded |
+		// Tangent-space normal mapping needs a tangent basis per vertex.
+		// Assimp can generate that basis for meshes that provide valid UVs.
 		aiProcess_CalcTangentSpace |
 		aiProcess_GenSmoothNormals |
 		aiProcess_SortByPType |
@@ -277,6 +282,8 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 
 		if (mesh->HasTangentsAndBitangents())
 		{
+			// Tangent + bitangent + normal form the local basis used later in the
+			  // shader to build a TBN matrix for normal-map sampling.
 			vertex.Tangent = XMFLOAT3(
 				mesh->mTangents[i].x,
 				mesh->mTangents[i].y,
@@ -289,6 +296,9 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		}
 		else
 		{
+			// Fallback keeps the vertex layout fully initialized even if a mesh does
+			// not provide valid tangent-space data. The shader still falls back to the
+			// geometric normal when no normal texture exists.
 			vertex.Tangent = XMFLOAT3(1.0f, 0.0f, 0.0f);
 			vertex.Bitangent = XMFLOAT3(0.0f, 1.0f, 0.0f);
 		}
@@ -328,6 +338,9 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 
 		const aiTextureType diffuseTextureType =
 			material->GetTextureCount(aiTextureType_BASE_COLOR) > 0 ? aiTextureType_BASE_COLOR : aiTextureType_DIFFUSE;
+		// Assimp may expose tangent-space normal data through NORMALS, but some
+		   // older assets still store the same texture in HEIGHT. For a simple viewer,
+		   // preferring NORMALS and falling back to HEIGHT covers more files.
 		const aiTextureType normalTextureType =
 			material->GetTextureCount(aiTextureType_NORMALS) > 0 ? aiTextureType_NORMALS : aiTextureType_HEIGHT;
 
@@ -387,6 +400,9 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		for (auto& tex : specularMaps)
 			textures.push_back(std::move(tex));
 
+		// Normal maps are loaded into the same generic texture list as the other
+		 // material maps. Later, UploadAllTexturesToGPU() assigns the descriptor slot
+		 // to MaterialData.normalStartIndex so the shader can find it.
 		std::vector<Texture> normalMaps = LoadMaterialTextures(material, normalTextureType, "texture_normal", scene);
 		for (auto& tex : normalMaps)
 			textures.push_back(std::move(tex));
@@ -597,6 +613,8 @@ void Model::UploadAllTexturesToGPU()
 			}
 			else if (tex.type == "texture_normal")
 			{
+				// First normal map wins for this beginner renderer. The material layout
+				 // is intentionally simple: one diffuse, one specular, one opacity, one normal.
 				if (!normalSet) {
 					matData.normalStartIndex = slot;
 					matData.numNormal = 1;
@@ -670,7 +688,7 @@ UINT Model::UploadTextureToHeap(Texture& texture)
 	D3D12_CPU_DESCRIPTOR_HANDLE handle = m_descriptorAllocator->GetStaticCpuHandle(slot);
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = GetTextureSrvFormat(texture);
+	srvDesc.Format = GetTextureSrvFormat(texture);
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 	srvDesc.Texture2D.MipLevels = (UINT)texture.image.GetMetadata().mipLevels;
