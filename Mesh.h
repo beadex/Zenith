@@ -14,8 +14,10 @@ struct MaterialData
 {
 	UINT diffuseStartIndex = 0;
 	UINT specularStartIndex = 0;
+	UINT opacityStartIndex = 0;
 	UINT numDiffuse = 0;
 	UINT numSpecular = 0;
+	UINT numOpacity = 0;
 };
 
 struct Texture {
@@ -23,13 +25,14 @@ struct Texture {
 	std::string path; // File path or embedded key
 	ScratchImage image;
 	UINT heapIndex = UINT_MAX;
+	bool hasAlpha = false;
 };
 
 class Mesh
 {
 public:
 	// Constructor to initialize the mesh with vertices, indices, and textures
-	Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures);
+	Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures, bool isTransparent);
 
 	// Draw the mesh using the provided command list
 	void Draw(ID3D12GraphicsCommandList* commandList);
@@ -38,6 +41,8 @@ public:
 	void ReleaseUploadBuffers();
 
 	std::vector<Texture>& GetTextures() { return m_textures; }
+	bool IsTransparent() const { return m_isTransparent; }
+	float GetCameraDistanceSquared(const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset) const;
 
 	D3D12_GPU_VIRTUAL_ADDRESS GetMaterialConstantBufferAddress() const
 	{
@@ -51,6 +56,8 @@ private:
 	std::vector<UINT> m_indices;
 	std::vector<Texture> m_textures;
 	MaterialData m_materialData;
+	bool m_isTransparent = false;
+	XMFLOAT3 m_boundsCenter = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
 	// Resource on GPU
 	ComPtr<ID3D12Resource> m_vertexBuffer;

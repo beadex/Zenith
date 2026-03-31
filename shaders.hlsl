@@ -15,8 +15,10 @@ struct MaterialData
 {
     uint diffuseStartIndex;
     uint specularStartIndex;
+    uint opacityStartIndex;
     uint numDiffuse;
     uint numSpecular;
+    uint numOpacity;
 };
 ConstantBuffer<MaterialData> materialData : register(b1);
 
@@ -73,6 +75,8 @@ struct GridPSInput
     float3 color : COLOR;
 };
 
+float4 SampleDiffuse(float2 uv);
+float SampleOpacity(float2 uv);
 float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv);
 
 // ============================================================
@@ -100,23 +104,45 @@ float4 PSMain(PSInput input) : SV_TARGET
 {
     float3 norm = normalize(input.normal);
     float3 viewDir = normalize(lightingData.viewPos.xyz - input.worldPos);
+    float4 diffuseSample = SampleDiffuse(input.uv);
+    float opacity = diffuseSample.a * SampleOpacity(input.uv);
+
+    // Fully transparent texels should not update depth, otherwise hidden parts
+    // of cutout textures can still occlude geometry behind them.
+    clip(opacity - 0.01f);
 
     float3 result = CalcDirLight(lightingData.directionalLight, norm, viewDir, input.uv);
 
     const float gamma = 2.2f;
     float3 gammaCorrected = pow(saturate(result), 1.0f / gamma);
 
-    return float4(gammaCorrected, 1.0f);
+    return float4(gammaCorrected, opacity);
+}
+
+float4 SampleDiffuse(float2 uv)
+{
+    if (materialData.numDiffuse > 0)
+    {
+        return gTextures[materialData.diffuseStartIndex].Sample(g_sampler, uv);
+    }
+
+    return float4(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+float SampleOpacity(float2 uv)
+{
+    if (materialData.numOpacity > 0)
+    {
+        return gTextures[materialData.opacityStartIndex].Sample(g_sampler, uv).r;
+    }
+
+    return 1.0f;
 }
 
 float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv)
 {
-    float3 albedo = float3(1.0f, 1.0f, 1.0f);
+    float3 albedo = SampleDiffuse(uv).rgb;
     float3 specMap = float3(1.0f, 1.0f, 1.0f);
-    if (materialData.numDiffuse > 0)
-    {
-        albedo = gTextures[materialData.diffuseStartIndex].Sample(g_sampler, uv).rgb;
-    }
 
     if (materialData.numSpecular > 0)
     {

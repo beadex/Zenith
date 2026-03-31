@@ -31,6 +31,7 @@ private:
 
 	ComPtr<ID3D12RootSignature> m_rootSignature;
 	ComPtr<ID3D12PipelineState> m_pipelineState;
+	ComPtr<ID3D12PipelineState> m_transparentPipelineState;
 	ComPtr<ID3D12PipelineState> m_gridPipelineState;
 
 	std::unique_ptr<Model> m_model;
@@ -86,10 +87,11 @@ private:
 
 	void CreateRootSignature();
 	void CreatePipelineState();
+	void CreateTransparentPipelineState();
 	void CreateGridPipelineState();
 	void CreateSceneDataConstantBuffer();
 	void CreateLightingDataConstantBuffer();
 	void CreateGridVertexBuffer(float radius = 10.0f);
 	void LoadModelFromPath(const std::wstring& path);
-  void UpdateLightingMenuState() const;
+	void UpdateLightingMenuState() const;
 };

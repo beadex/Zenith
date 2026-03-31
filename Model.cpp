@@ -4,6 +4,20 @@
 
 using namespace DirectX;
 
+namespace
+{
+	bool TextureHasAlpha(const ScratchImage& image)
+	{
+		return DirectX::HasAlpha(image.GetMetadata().format);
+	}
+
+	void DrawMesh(ID3D12GraphicsCommandList* commandList, Mesh& mesh)
+	{
+		commandList->SetGraphicsRootConstantBufferView(2, mesh.GetMaterialConstantBufferAddress());
+		mesh.Draw(commandList);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Model
 //
@@ -40,20 +54,39 @@ Model::~Model()
 	}
 }
 
-void Model::Draw(ID3D12GraphicsCommandList* commandList)
+void Model::DrawOpaque(ID3D12GraphicsCommandList* commandList)
 {
-	// Loop through each mesh in the model and call its Draw method
 	for (auto& mesh : m_meshes)
 	{
-		// Root param 1: SceneData (b0) → bind ở ngoài Model::Draw, 
-		//               do caller (render loop) set trước khi gọi hàm này
+		if (!mesh.IsTransparent())
+		{
+			DrawMesh(commandList, mesh);
+		}
+	}
+}
 
-		// Root param 2: MaterialData (b1) → đổi per mesh
-		commandList->SetGraphicsRootConstantBufferView(
-			2,
-			mesh.GetMaterialConstantBufferAddress()); // GPU address của constant buffer
+void Model::DrawTransparent(ID3D12GraphicsCommandList* commandList, const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset)
+{
+	std::vector<Mesh*> transparentMeshes;
+	transparentMeshes.reserve(m_meshes.size());
 
-		mesh.Draw(commandList);
+	for (auto& mesh : m_meshes)
+	{
+		if (mesh.IsTransparent())
+		{
+			transparentMeshes.push_back(&mesh);
+		}
+	}
+
+	std::sort(transparentMeshes.begin(), transparentMeshes.end(),
+		[&cameraPosition, &modelOffset](const Mesh* lhs, const Mesh* rhs)
+		{
+			return lhs->GetCameraDistanceSquared(cameraPosition, modelOffset) > rhs->GetCameraDistanceSquared(cameraPosition, modelOffset);
+		});
+
+	for (Mesh* mesh : transparentMeshes)
+	{
+		DrawMesh(commandList, *mesh);
 	}
 }
 
@@ -199,20 +232,36 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 	if (mesh->mMaterialIndex >= 0)
 	{
 		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
-		textures.reserve(material->GetTextureCount(aiTextureType_DIFFUSE) + material->GetTextureCount(aiTextureType_SPECULAR));
+		bool isTransparent = material->GetTextureCount(aiTextureType_OPACITY) > 0;
+		textures.reserve(
+			material->GetTextureCount(aiTextureType_DIFFUSE) +
+			material->GetTextureCount(aiTextureType_SPECULAR) +
+			material->GetTextureCount(aiTextureType_OPACITY));
 
 		// Load diffuse textures
 		std::vector<Texture> diffuseMaps = LoadMaterialTextures(material, aiTextureType_DIFFUSE, "texture_diffuse", scene);
 		for (auto& tex : diffuseMaps)
+		{
+			isTransparent = isTransparent || tex.hasAlpha;
 			textures.push_back(std::move(tex));
+		}
 
 		// Load specular textures
 		std::vector<Texture> specularMaps = LoadMaterialTextures(material, aiTextureType_SPECULAR, "texture_specular", scene);
 		for (auto& tex : specularMaps)
 			textures.push_back(std::move(tex));
+
+		std::vector<Texture> opacityMaps = LoadMaterialTextures(material, aiTextureType_OPACITY, "texture_opacity", scene);
+		for (auto& tex : opacityMaps)
+		{
+			isTransparent = true;
+			textures.push_back(std::move(tex));
+		}
+
+		return Mesh(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), isTransparent);
 	}
 
-	return Mesh(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures));
+	return Mesh(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), false);
 }
 
 std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType type, const std::string& typeName, const aiScene* scene)
@@ -246,6 +295,7 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 
 		if (m_loadedPaths.count(texture.path))
 		{
+			texture.hasAlpha = m_textureTransparencyCache[texture.path];
 			textures.push_back(std::move(texture));
 			continue;
 		}
@@ -254,6 +304,7 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 		if (m_textureCache.count(texture.path))
 		{
 			texture.heapIndex = m_textureCache[texture.path];
+			texture.hasAlpha = m_textureTransparencyCache[texture.path];
 			textures.push_back(std::move(texture));
 			continue; // skip load hoàn toàn — ScratchImage không bị tạo
 		}
@@ -334,6 +385,9 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 			}
 		}
 
+		texture.hasAlpha = (type == aiTextureType_OPACITY) || TextureHasAlpha(texture.image);
+		m_textureTransparencyCache[texture.path] = texture.hasAlpha;
+
 		textures.push_back(std::move(texture));
 	}
 
@@ -351,6 +405,7 @@ void Model::UploadAllTexturesToGPU()
 		MaterialData matData = {};
 		bool diffuseSet = false;
 		bool specularSet = false;
+		bool opacitySet = false;
 
 		OutputDebugStringA(("=== Mesh " + std::to_string(meshIdx) +
 			" has " + std::to_string(mesh.GetTextures().size()) + " textures ===\n").c_str());
@@ -374,6 +429,14 @@ void Model::UploadAllTexturesToGPU()
 					matData.specularStartIndex = slot;
 					matData.numSpecular = 1;
 					specularSet = true;
+				}
+			}
+			else if (tex.type == "texture_opacity")
+			{
+				if (!opacitySet) {
+					matData.opacityStartIndex = slot;
+					matData.numOpacity = 1;
+					opacitySet = true;
 				}
 			}
 		}

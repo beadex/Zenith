@@ -82,6 +82,7 @@ void ZenithRenderEngine::OnInit()
 	   // program: root signature, PSOs, persistent upload buffers, and the grid.
 	CreateRootSignature();
 	CreatePipelineState();
+	CreateTransparentPipelineState();
 	CreateGridPipelineState();
 	CreateSceneDataConstantBuffer();
 	CreateLightingDataConstantBuffer();
@@ -283,6 +284,60 @@ void ZenithRenderEngine::CreatePipelineState()
 	psoDesc.DepthStencilState.StencilEnable = FALSE;
 
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)));
+
+	free(pVertexShaderData);
+	free(pPixelShaderData);
+}
+
+void ZenithRenderEngine::CreateTransparentPipelineState()
+{
+	auto device = m_renderContext->GetDevice();
+
+	UINT8* pVertexShaderData = nullptr;
+	UINT8* pPixelShaderData = nullptr;
+	UINT vertexShaderDataLength = 0;
+	UINT pixelShaderDataLength = 0;
+
+	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_VSMain.cso").c_str(), &pVertexShaderData, &vertexShaderDataLength));
+	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_PSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength));
+
+	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+	psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
+	psoDesc.pRootSignature = m_rootSignature.Get();
+	psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
+	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
+	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	psoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+	psoDesc.SampleMask = UINT_MAX;
+	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	psoDesc.NumRenderTargets = 1;
+	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+	psoDesc.SampleDesc.Count = 1;
+	psoDesc.SampleDesc.Quality = 0;
+	psoDesc.DepthStencilState.DepthEnable = TRUE;
+	psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+	psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+	psoDesc.DepthStencilState.StencilEnable = FALSE;
+
+	auto& transparentBlend = psoDesc.BlendState.RenderTarget[0];
+	transparentBlend.BlendEnable = TRUE;
+	transparentBlend.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	transparentBlend.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+	transparentBlend.BlendOp = D3D12_BLEND_OP_ADD;
+	transparentBlend.SrcBlendAlpha = D3D12_BLEND_ONE;
+	transparentBlend.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+	transparentBlend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+	transparentBlend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
+	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_transparentPipelineState)));
 
 	free(pVertexShaderData);
 	free(pPixelShaderData);
@@ -590,12 +645,17 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	commandList->IASetVertexBuffers(0, 1, &m_gridVertexBufferView);
 	commandList->DrawInstanced(m_gridVertexCount, 1, 0, 0);
 
-	// Switch to the main model PSO for triangle rendering.
+	// Opaque meshes render first so they fill depth normally.
 	commandList->SetPipelineState(m_pipelineState.Get());
 
 	// 6. Draw the model
 	if (m_model) {
-		m_model->Draw(commandList);
+		m_model->DrawOpaque(commandList);
+
+		XMFLOAT3 cameraPosition;
+		XMStoreFloat3(&cameraPosition, m_camera.GetPosition());
+		commandList->SetPipelineState(m_transparentPipelineState.Get());
+		m_model->DrawTransparent(commandList, cameraPosition, m_modelOffset);
 	}
 
 	// 7. Present() closes and executes the command list, then presents the swap chain.

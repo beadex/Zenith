@@ -15,13 +15,34 @@
 //   - UPLOAD heaps   -> CPU-visible staging memory used to initialize them
 // ---------------------------------------------------------------------------
 
-Mesh::Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures) :
-	m_vertices(vertices),
-	m_indices(indices),
+Mesh::Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures, bool isTransparent) :
+	m_vertices(std::move(vertices)),
+	m_indices(std::move(indices)),
 	m_textures(std::move(textures)),
-	m_vertexCount(static_cast<UINT>(vertices.size())),
-	m_indexCount(static_cast<UINT>(indices.size()))
+	m_vertexCount(static_cast<UINT>(m_vertices.size())),
+	m_indexCount(static_cast<UINT>(m_indices.size())),
+	m_isTransparent(isTransparent)
 {
+	if (!m_vertices.empty())
+	{
+		XMFLOAT3 boundsMin(FLT_MAX, FLT_MAX, FLT_MAX);
+		XMFLOAT3 boundsMax(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+		for (const auto& vertex : m_vertices)
+		{
+			boundsMin.x = (std::min)(boundsMin.x, vertex.Position.x);
+			boundsMin.y = (std::min)(boundsMin.y, vertex.Position.y);
+			boundsMin.z = (std::min)(boundsMin.z, vertex.Position.z);
+			boundsMax.x = (std::max)(boundsMax.x, vertex.Position.x);
+			boundsMax.y = (std::max)(boundsMax.y, vertex.Position.y);
+			boundsMax.z = (std::max)(boundsMax.z, vertex.Position.z);
+		}
+
+		m_boundsCenter = XMFLOAT3(
+			(boundsMin.x + boundsMax.x) * 0.5f,
+			(boundsMin.y + boundsMax.y) * 0.5f,
+			(boundsMin.z + boundsMax.z) * 0.5f);
+	}
+
 	CreateVertexAndIndexBuffers(device, commandList);
 	CreateMaterialConstantBuffer(device);
 }
@@ -41,10 +62,20 @@ void Mesh::SetMaterialData(const MaterialData& data)
 	OutputDebugStringA(("SetMaterialData: diffuseStart=" + std::to_string(data.diffuseStartIndex) +
 		" numDiffuse=" + std::to_string(data.numDiffuse) +
 		" specularStart=" + std::to_string(data.specularStartIndex) +
-		" numSpecular=" + std::to_string(data.numSpecular) + "\n").c_str());
+		" numSpecular=" + std::to_string(data.numSpecular) +
+		" opacityStart=" + std::to_string(data.opacityStartIndex) +
+		" numOpacity=" + std::to_string(data.numOpacity) + "\n").c_str());
 	m_materialData = data;
 	// m_mappedMaterialData luôn valid vì giữ mapped suốt lifetime
 	memcpy(m_mappedMaterialData, &data, sizeof(MaterialData));
+}
+
+float Mesh::GetCameraDistanceSquared(const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset) const
+{
+	const float dx = (m_boundsCenter.x + modelOffset.x) - cameraPosition.x;
+	const float dy = (m_boundsCenter.y + modelOffset.y) - cameraPosition.y;
+	const float dz = (m_boundsCenter.z + modelOffset.z) - cameraPosition.z;
+	return dx * dx + dy * dy + dz * dz;
 }
 
 void Mesh::CreateVertexAndIndexBuffers(ID3D12Device* device, ID3D12GraphicsCommandList* commandList)
