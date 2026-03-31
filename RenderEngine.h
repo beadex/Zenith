@@ -37,6 +37,7 @@ private:
 	static constexpr float ShadowComparisonBias = 0.0015f;
 	static constexpr float ShadowMinFrustumPadding = 1.0f;
 	static constexpr float ShadowDepthRangePaddingScale = 0.5f;
+	static constexpr bool FlipNormalMapGreenChannel = false;
 
 	// The renderer now keeps four model PSOs instead of one so it can route each
 	// mesh by two independent material properties:
@@ -116,7 +117,7 @@ private:
 		XMFLOAT4X4 lightViewProjection;
 		// x = shadow map SRV index
 		  // y = depth bias used during comparison
-		  // z = reserved for future tuning
+	   // z = normal-map green channel sign (+1 or -1)
 		  // w = 1 when directional light/shadows are enabled
 		XMFLOAT4 shadowParams;
 		float padding[24];

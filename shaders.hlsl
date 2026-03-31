@@ -39,13 +39,16 @@ struct MaterialData
     uint diffuseStartIndex;
     uint specularStartIndex;
     uint opacityStartIndex;
+    uint normalStartIndex;
     uint numDiffuse;
     uint numSpecular;
     uint numOpacity;
+    uint numNormal;
     // Matches the C++ MaterialAlphaMode* constants.
     uint alphaMode;
     // Used only for glTF alphaMode = MASK.
     float alphaCutoff;
+    float2 padding;
     // Lightweight glTF support: material tint and alpha factor.
     float4 baseColorFactor;
 };
@@ -71,7 +74,7 @@ struct LightingData
     float4x4 lightViewProjection;
     // x = shadow map descriptor index in gTextures[]
     // y = depth bias
-    // z = reserved
+    // z = normal-map green channel sign (+1 or -1)
     // w = 1 when shadowing is enabled
     float4 shadowParams;
 };
@@ -93,6 +96,8 @@ struct VSInput
     float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD;
+    float3 tangent : TANGENT;
+    float3 bitangent : BINORMAL;
 };
 
 struct PSInput
@@ -101,6 +106,8 @@ struct PSInput
     float3 normal : NORMAL;
     float3 worldPos : POSITION;
     float2 uv : TEXCOORD;
+    float3 tangent : TANGENT;
+    float3 bitangent : BINORMAL;
 };
 
 struct ShadowPSInput
@@ -123,6 +130,7 @@ struct GridPSInput
 
 float4 SampleDiffuse(float2 uv);
 float SampleOpacity(float2 uv);
+float3 SampleNormal(float2 uv, float3 normal, float3 tangent, float3 bitangent);
 
 // For the beginner shadow implementation, it helps to keep direct-light pieces
 // separate so the shader can treat them differently in shadow:
@@ -148,6 +156,8 @@ PSInput VSMain(VSInput input)
     float4 worldPos = mul(float4(input.position, 1.0f), sceneData.model);
     vout.worldPos = worldPos.xyz;
     vout.normal = normalize(mul(input.normal, (float3x3) sceneData.normalMatrix));
+    vout.tangent = normalize(mul(input.tangent, (float3x3) sceneData.normalMatrix));
+    vout.bitangent = normalize(mul(input.bitangent, (float3x3) sceneData.normalMatrix));
     vout.position = mul(mul(worldPos, sceneData.view), sceneData.projection);
     vout.uv = input.uv;
 
@@ -160,7 +170,7 @@ PSInput VSMain(VSInput input)
 
 float4 PSMain(PSInput input) : SV_TARGET
 {
-    float3 norm = normalize(input.normal);
+    float3 norm = SampleNormal(input.uv, input.normal, input.tangent, input.bitangent);
     float3 viewDir = normalize(lightingData.viewPos.xyz - input.worldPos);
     float4 diffuseSample = SampleDiffuse(input.uv);
 
@@ -225,6 +235,41 @@ float SampleOpacity(float2 uv)
     return 1.0f;
 }
 
+float3 SampleNormal(float2 uv, float3 normal, float3 tangent, float3 bitangent)
+{
+    float3 norm = normalize(normal);
+
+    if (materialData.numNormal == 0)
+    {
+        return norm;
+    }
+
+    float3 t = tangent - norm * dot(tangent, norm);
+    float tangentLengthSq = dot(t, t);
+    if (tangentLengthSq < 1e-6f)
+    {
+        return norm;
+    }
+
+    t *= rsqrt(tangentLengthSq);
+
+    float3 b = bitangent - norm * dot(bitangent, norm);
+    float bitangentLengthSq = dot(b, b);
+    if (bitangentLengthSq < 1e-6f)
+    {
+        b = normalize(cross(norm, t));
+    }
+    else
+    {
+        b *= rsqrt(bitangentLengthSq);
+    }
+
+    float3 normalSample = gTextures[materialData.normalStartIndex].Sample(g_sampler, uv).xyz * 2.0f - 1.0f;
+    normalSample.y *= lightingData.shadowParams.z;
+    float3x3 tbn = float3x3(t, b, norm);
+    return normalize(mul(normalSample, tbn));
+}
+
 DirectLightResult CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv)
 {
     DirectLightResult result;
@@ -277,7 +322,7 @@ float ComputeShadowVisibility(float3 worldPos)
         return 1.0f;
     }
 
-    uint shadowMapIndex = (uint)lightingData.shadowParams.x;
+    uint shadowMapIndex = (uint) lightingData.shadowParams.x;
     uint shadowMapWidth = 0;
     uint shadowMapHeight = 0;
     gTextures[shadowMapIndex].GetDimensions(shadowMapWidth, shadowMapHeight);

@@ -6,15 +6,15 @@ using namespace DirectX;
 
 namespace
 {
- // These values intentionally match the shader-side constants in shaders.hlsl.
+	// These values intentionally match the shader-side constants in shaders.hlsl.
 	constexpr UINT MaterialAlphaModeOpaque = 0;
 	constexpr UINT MaterialAlphaModeMask = 1;
 	constexpr UINT MaterialAlphaModeBlend = 2;
 
- // Having an alpha channel is not the same thing as actually using it.
-	// Many glTF base-color textures are stored as RGBA even when every texel is
-	// fully opaque. This helper scans the decoded pixels so only materials that
-	// really use transparency are routed into the transparent pass.
+	// Having an alpha channel is not the same thing as actually using it.
+	   // Many glTF base-color textures are stored as RGBA even when every texel is
+	   // fully opaque. This helper scans the decoded pixels so only materials that
+	   // really use transparency are routed into the transparent pass.
 	bool TextureUsesTransparency(const ScratchImage& image)
 	{
 		const TexMetadata& metadata = image.GetMetadata();
@@ -51,16 +51,28 @@ namespace
 
 	void DrawMesh(ID3D12GraphicsCommandList* commandList, Mesh& mesh)
 	{
-     // Root slot 2 is the per-mesh MaterialData root CBV.
+		// Root slot 2 is the per-mesh MaterialData root CBV.
 		commandList->SetGraphicsRootConstantBufferView(2, mesh.GetMaterialConstantBufferAddress());
 		mesh.Draw(commandList);
 	}
 
-    // Rendering is split by both transparency and double-sided state so the caller
+	// Rendering is split by both transparency and double-sided state so the caller
 	// can choose the correct PSO before drawing a subset of meshes.
 	bool MeshMatchesRenderPass(const Mesh& mesh, bool transparent, bool doubleSided)
 	{
 		return mesh.IsTransparent() == transparent && mesh.IsDoubleSided() == doubleSided;
+	}
+
+	DXGI_FORMAT GetTextureSrvFormat(const Texture& texture)
+	{
+		DXGI_FORMAT format = texture.image.GetMetadata().format;
+
+		if (texture.type == "texture_normal")
+		{
+			format = DirectX::MakeLinear(format);
+		}
+
+		return format;
 	}
 }
 
@@ -102,7 +114,7 @@ Model::~Model()
 
 void Model::DrawOpaque(ID3D12GraphicsCommandList* commandList, bool doubleSided)
 {
- // Opaque geometry is not sorted; it relies on normal depth writes.
+	// Opaque geometry is not sorted; it relies on normal depth writes.
 	for (auto& mesh : m_meshes)
 	{
 		if (MeshMatchesRenderPass(mesh, false, doubleSided))
@@ -114,7 +126,7 @@ void Model::DrawOpaque(ID3D12GraphicsCommandList* commandList, bool doubleSided)
 
 void Model::DrawTransparent(ID3D12GraphicsCommandList* commandList, const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset, bool doubleSided)
 {
-   // Transparent geometry is collected first, then sorted back-to-front.
+	// Transparent geometry is collected first, then sorted back-to-front.
 	std::vector<Mesh*> transparentMeshes;
 	transparentMeshes.reserve(m_meshes.size());
 
@@ -149,6 +161,7 @@ void Model::LoadModel(const std::string& path)
 		aiProcess_Triangulate |
 		aiProcess_PreTransformVertices |
 		aiProcess_ConvertToLeftHanded |
+		aiProcess_CalcTangentSpace |
 		aiProcess_GenSmoothNormals |
 		aiProcess_SortByPType |
 		aiProcess_GenUVCoords |
@@ -262,6 +275,24 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 			vertex.TexCoord = XMFLOAT2(0.0f, 0.0f);
 		}
 
+		if (mesh->HasTangentsAndBitangents())
+		{
+			vertex.Tangent = XMFLOAT3(
+				mesh->mTangents[i].x,
+				mesh->mTangents[i].y,
+				mesh->mTangents[i].z);
+
+			vertex.Bitangent = XMFLOAT3(
+				mesh->mBitangents[i].x,
+				mesh->mBitangents[i].y,
+				mesh->mBitangents[i].z);
+		}
+		else
+		{
+			vertex.Tangent = XMFLOAT3(1.0f, 0.0f, 0.0f);
+			vertex.Bitangent = XMFLOAT3(0.0f, 1.0f, 0.0f);
+		}
+
 		vertices.push_back(vertex);
 	}
 
@@ -281,7 +312,7 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 	{
 		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
 		MaterialData materialData = {};
-        // glTF stores transparency in several different places. The lightweight
+		// glTF stores transparency in several different places. The lightweight
 		// path implemented here supports the major ones without going full PBR:
 		//   - baseColorFactor alpha
 		//   - baseColor texture alpha
@@ -297,10 +328,12 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 
 		const aiTextureType diffuseTextureType =
 			material->GetTextureCount(aiTextureType_BASE_COLOR) > 0 ? aiTextureType_BASE_COLOR : aiTextureType_DIFFUSE;
+		const aiTextureType normalTextureType =
+			material->GetTextureCount(aiTextureType_NORMALS) > 0 ? aiTextureType_NORMALS : aiTextureType_HEIGHT;
 
-     // When glTF alphaMode exists, it is treated as the authoritative source for
-		// pass selection. Only materials without an explicit alphaMode fall back to
-		// older heuristics.
+		// When glTF alphaMode exists, it is treated as the authoritative source for
+		   // pass selection. Only materials without an explicit alphaMode fall back to
+		   // older heuristics.
 		aiString alphaMode;
 		const bool hasExplicitAlphaMode = material->Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == aiReturn_SUCCESS;
 		const bool isBlendAlphaMode = hasExplicitAlphaMode && _stricmp(alphaMode.C_Str(), "BLEND") == 0;
@@ -334,7 +367,8 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		textures.reserve(
 			material->GetTextureCount(diffuseTextureType) +
 			material->GetTextureCount(aiTextureType_SPECULAR) +
-			material->GetTextureCount(aiTextureType_OPACITY));
+			material->GetTextureCount(aiTextureType_OPACITY) +
+			material->GetTextureCount(normalTextureType));
 
 		// Load diffuse/base-color textures.
 		std::vector<Texture> diffuseMaps = LoadMaterialTextures(material, diffuseTextureType, "texture_diffuse", scene);
@@ -351,6 +385,10 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		// Load specular textures
 		std::vector<Texture> specularMaps = LoadMaterialTextures(material, aiTextureType_SPECULAR, "texture_specular", scene);
 		for (auto& tex : specularMaps)
+			textures.push_back(std::move(tex));
+
+		std::vector<Texture> normalMaps = LoadMaterialTextures(material, normalTextureType, "texture_normal", scene);
+		for (auto& tex : normalMaps)
 			textures.push_back(std::move(tex));
 
 		std::vector<Texture> opacityMaps = LoadMaterialTextures(material, aiTextureType_OPACITY, "texture_opacity", scene);
@@ -495,8 +533,8 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 			}
 		}
 
-       // Opacity maps are always treated as transparency-driving textures. Other
-		// textures are classified only if they actually contain non-opaque alpha.
+		// Opacity maps are always treated as transparency-driving textures. Other
+		 // textures are classified only if they actually contain non-opaque alpha.
 		texture.hasAlpha = (type == aiTextureType_OPACITY) || TextureUsesTransparency(texture.image);
 		m_textureTransparencyCache[texture.path] = texture.hasAlpha;
 
@@ -523,6 +561,7 @@ void Model::UploadAllTexturesToGPU()
 		bool diffuseSet = false;
 		bool specularSet = false;
 		bool opacitySet = false;
+		bool normalSet = false;
 
 		OutputDebugStringA(("=== Mesh " + std::to_string(meshIdx) +
 			" has " + std::to_string(mesh.GetTextures().size()) + " textures ===\n").c_str());
@@ -554,6 +593,14 @@ void Model::UploadAllTexturesToGPU()
 					matData.opacityStartIndex = slot;
 					matData.numOpacity = 1;
 					opacitySet = true;
+				}
+			}
+			else if (tex.type == "texture_normal")
+			{
+				if (!normalSet) {
+					matData.normalStartIndex = slot;
+					matData.numNormal = 1;
+					normalSet = true;
 				}
 			}
 		}
@@ -623,7 +670,7 @@ UINT Model::UploadTextureToHeap(Texture& texture)
 	D3D12_CPU_DESCRIPTOR_HANDLE handle = m_descriptorAllocator->GetStaticCpuHandle(slot);
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-	srvDesc.Format = texture.image.GetMetadata().format;
+    srvDesc.Format = GetTextureSrvFormat(texture);
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 	srvDesc.Texture2D.MipLevels = (UINT)texture.image.GetMetadata().mipLevels;

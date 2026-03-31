@@ -19,7 +19,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 		return static_cast<int>(hr);
 	}
 
-	ZenithRenderEngine engine(1280, 720, L"Zenith 3D");
+	ZenithRenderEngine engine(1920, 1080, L"Zenith 3D");
 	const int exitCode = Win32Application::Run(&engine, hInstance, nCmdShow);
 
 	if (coInitialized)

@@ -8,34 +8,39 @@ struct Vertex
 	XMFLOAT3 Position;
 	XMFLOAT3 Normal;
 	XMFLOAT2 TexCoord;
+	XMFLOAT3 Tangent;
+	XMFLOAT3 Bitangent;
 };
 
 struct MaterialData
 {
- // Texture descriptor indices copied into the shader-visible heap each frame.
+	// Texture descriptor indices copied into the shader-visible heap each frame.
 	UINT diffuseStartIndex = 0;
 	UINT specularStartIndex = 0;
 	UINT opacityStartIndex = 0;
-    // Texture counts let the shader know whether a given texture type exists.
+	UINT normalStartIndex = 0;
+	// Texture counts let the shader know whether a given texture type exists.
 	UINT numDiffuse = 0;
 	UINT numSpecular = 0;
 	UINT numOpacity = 0;
- // glTF alpha handling:
-	//   0 = OPAQUE
-	//   1 = MASK
-	//   2 = BLEND
+	UINT numNormal = 0;
+	// glTF alpha handling:
+	   //   0 = OPAQUE
+	   //   1 = MASK
+	   //   2 = BLEND
 	UINT alphaMode = 0;
-   // Used only by glTF MASK materials.
+	// Used only by glTF MASK materials.
 	float alphaCutoff = 0.5f;
-    // Base color factor is the lightweight way this sample now respects glTF
+	XMFLOAT2 padding = XMFLOAT2(0.0f, 0.0f);
+	// Base color factor is the lightweight way this sample now respects glTF
 	// material tint and alpha without implementing a full PBR shading model.
 	XMFLOAT4 baseColorFactor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 };
 
-static_assert(offsetof(MaterialData, baseColorFactor) == 32, "MaterialData must match HLSL packing.");
+static_assert(offsetof(MaterialData, baseColorFactor) == 48, "MaterialData must match HLSL packing.");
 
 struct Texture {
-	std::string type; // For example: "texture_diffuse", "texture_specular"
+	std::string type; // For example: "texture_diffuse", "texture_specular", "texture_normal"
 	std::string path; // File path or embedded key
 	ScratchImage image;
 	UINT heapIndex = UINT_MAX;
@@ -56,8 +61,8 @@ public:
 
 	std::vector<Texture>& GetTextures() { return m_textures; }
 	bool IsTransparent() const { return m_isTransparent; }
-  // doubleSided is stored per mesh so the renderer can choose the correct PSO
-	// instead of globally disabling culling for an entire pass.
+	// doubleSided is stored per mesh so the renderer can choose the correct PSO
+	  // instead of globally disabling culling for an entire pass.
 	bool IsDoubleSided() const { return m_isDoubleSided; }
 	const MaterialData& GetMaterialData() const { return m_materialData; }
 	float GetCameraDistanceSquared(const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset) const;

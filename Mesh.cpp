@@ -24,7 +24,7 @@ Mesh::Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::ve
 	m_isTransparent(isTransparent),
 	m_isDoubleSided(isDoubleSided)
 {
-    // Cache a simple center point for this mesh. Transparent meshes are later
+	// Cache a simple center point for this mesh. Transparent meshes are later
 	// sorted back-to-front using this center as an inexpensive approximation.
 	if (!m_vertices.empty())
 	{
@@ -62,14 +62,16 @@ void Mesh::Draw(ID3D12GraphicsCommandList* commandList)
 
 void Mesh::SetMaterialData(const MaterialData& data)
 {
- // The material constant buffer is kept persistently mapped, so updating the
-	// shader-visible material state is just a memcpy into CPU-visible upload memory.
+	// The material constant buffer is kept persistently mapped, so updating the
+	   // shader-visible material state is just a memcpy into CPU-visible upload memory.
 	OutputDebugStringA(("SetMaterialData: diffuseStart=" + std::to_string(data.diffuseStartIndex) +
 		" numDiffuse=" + std::to_string(data.numDiffuse) +
 		" specularStart=" + std::to_string(data.specularStartIndex) +
 		" numSpecular=" + std::to_string(data.numSpecular) +
 		" opacityStart=" + std::to_string(data.opacityStartIndex) +
 		" numOpacity=" + std::to_string(data.numOpacity) +
+		" normalStart=" + std::to_string(data.normalStartIndex) +
+		" numNormal=" + std::to_string(data.numNormal) +
 		" alphaMode=" + std::to_string(data.alphaMode) +
 		" alphaCutoff=" + std::to_string(data.alphaCutoff) +
 		" baseAlpha=" + std::to_string(data.baseColorFactor.w) + "\n").c_str());
