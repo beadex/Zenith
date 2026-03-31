@@ -210,6 +210,7 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 		m_descriptorManager->Initialize(m_device.Get());
 		auto* rtvAllocator = m_descriptorManager->GetRtvAllocator();
 		auto* dsvAllocator = m_descriptorManager->GetDsvAllocator();
+		auto* cbvSrvUavAllocator = m_descriptorManager->GetCbvSrvUavAllocator();
 
 		// The depth buffer is a normal GPU texture resource. The DSV descriptor is
 		   // just the view that lets the pipeline treat that texture as a depth target.
@@ -237,6 +238,44 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 		));
 
 		m_device->CreateDepthStencilView(m_depthBuffer.Get(), nullptr, dsvAllocator->GetCpuHandle(0));
+
+		D3D12_RESOURCE_DESC shadowDesc = {};
+		shadowDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+		shadowDesc.Width = ShadowMapWidth;
+		shadowDesc.Height = ShadowMapHeight;
+		shadowDesc.DepthOrArraySize = 1;
+		shadowDesc.MipLevels = 1;
+		shadowDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+		shadowDesc.SampleDesc = { 1, 0 };
+		shadowDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+		D3D12_CLEAR_VALUE shadowClear = {};
+		shadowClear.Format = DXGI_FORMAT_D32_FLOAT;
+		shadowClear.DepthStencil.Depth = 1.0f;
+
+		ThrowIfFailed(m_device->CreateCommittedResource(
+			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+			D3D12_HEAP_FLAG_NONE,
+			&shadowDesc,
+			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+			&shadowClear,
+			IID_PPV_ARGS(&m_shadowMap)
+		));
+
+		D3D12_DEPTH_STENCIL_VIEW_DESC shadowDsvDesc = {};
+		shadowDsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
+		shadowDsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+		shadowDsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+		m_device->CreateDepthStencilView(m_shadowMap.Get(), &shadowDsvDesc, dsvAllocator->GetCpuHandle(1));
+
+		m_shadowMapSrvIndex = cbvSrvUavAllocator->AllocateStaticDescriptor();
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC shadowSrvDesc = {};
+		shadowSrvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+		shadowSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		shadowSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		shadowSrvDesc.Texture2D.MipLevels = 1;
+		m_device->CreateShaderResourceView(m_shadowMap.Get(), &shadowSrvDesc, cbvSrvUavAllocator->GetStaticCpuHandle(m_shadowMapSrvIndex));
 
 		m_rtvDescriptorSize = rtvAllocator->GetDescriptorSize();
 		m_dsvDescriptorSize = dsvAllocator->GetDescriptorSize();

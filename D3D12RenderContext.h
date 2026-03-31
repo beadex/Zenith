@@ -10,6 +10,8 @@ class D3D12RenderContext
 public:
 	// FrameCount thường là 2 cho Double Buffering hoặc 3 cho Triple Buffering
 	static const UINT FrameCount = 2;
+	static const UINT ShadowMapWidth = 2048;
+	static const UINT ShadowMapHeight = 2048;
 
 	D3D12RenderContext(UINT width, UINT height);
 	~D3D12RenderContext();
@@ -52,10 +54,18 @@ public:
 		return m_descriptorManager->GetDsvAllocator()->GetCpuHandle(0);
 	}
 	UINT GetDsvDescriptorSize() const { return m_dsvDescriptorSize; };
+	D3D12_CPU_DESCRIPTOR_HANDLE GetMainDepthDsv() const { return m_descriptorManager->GetDsvAllocator()->GetCpuHandle(0); }
+	D3D12_CPU_DESCRIPTOR_HANDLE GetShadowMapDsv() const { return m_descriptorManager->GetDsvAllocator()->GetCpuHandle(1); }
 	CbvSrvUavAllocator* GetCbvSrvUavAllocator() const { return m_descriptorManager->GetCbvSrvUavAllocator(); }
 	RenderTargetAllocator* GetRtvAllocator() const { return m_descriptorManager->GetRtvAllocator(); }
 	DepthStencilAllocator* GetDsvAllocator() const { return m_descriptorManager->GetDsvAllocator(); }
 	UINT Get4xMsaaQuality() const { return m_4xMsaaQuality; }
+	ID3D12Resource* GetShadowMap() const { return m_shadowMap.Get(); }
+	UINT GetShadowMapSrvIndex() const { return m_shadowMapSrvIndex; }
+	D3D12_CPU_DESCRIPTOR_HANDLE GetShadowMapSrvCpuHandle() const { return m_descriptorManager->GetCbvSrvUavAllocator()->GetStaticCpuHandle(m_shadowMapSrvIndex); }
+	D3D12_GPU_DESCRIPTOR_HANDLE GetShadowMapSrvGpuHandle() const { return m_descriptorManager->GetCbvSrvUavAllocator()->GetDynamicGpuHandle(m_shadowMapSrvIndex); }
+	const CD3DX12_VIEWPORT& GetShadowMapViewport() const { return m_shadowViewport; }
+	const CD3DX12_RECT& GetShadowMapScissorRect() const { return m_shadowScissorRect; }
 
 private:
 	ComPtr<IDXGIFactory4> m_factory;
@@ -76,12 +86,16 @@ private:
 	UINT m_rtvDescriptorSize;
 	UINT m_dsvDescriptorSize;
 	ComPtr<ID3D12Resource> m_depthBuffer;
+	ComPtr<ID3D12Resource> m_shadowMap;
 	ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
 	ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
 	ComPtr<ID3D12GraphicsCommandList> m_commandList;
 	std::unique_ptr<DescriptorManager> m_descriptorManager;
 	UINT m_4xMsaaQuality = 0;
 	DXGI_FORMAT m_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	UINT m_shadowMapSrvIndex = UINT_MAX;
+	CD3DX12_VIEWPORT m_shadowViewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(ShadowMapWidth), static_cast<float>(ShadowMapHeight));
+	CD3DX12_RECT m_shadowScissorRect = CD3DX12_RECT(0, 0, static_cast<LONG>(ShadowMapWidth), static_cast<LONG>(ShadowMapHeight));
 
 	// Synchronization objects
 	UINT m_frameIndex;
