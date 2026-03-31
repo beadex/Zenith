@@ -100,7 +100,18 @@ struct GridPSInput
 
 float4 SampleDiffuse(float2 uv);
 float SampleOpacity(float2 uv);
-float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv);
+
+// For the beginner shadow implementation, it helps to keep direct-light pieces
+// separate so the shader can treat them differently in shadow:
+//   - diffuse  -> fades with normal PCF visibility
+//   - specular -> fades even faster so shadowed highlights do not linger
+struct DirectLightResult
+{
+    float3 diffuse;
+    float3 specular;
+};
+
+DirectLightResult CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv);
 float ComputeShadowVisibility(float3 worldPos);
 
 // ============================================================
@@ -129,6 +140,7 @@ float4 PSMain(PSInput input) : SV_TARGET
     float3 norm = normalize(input.normal);
     float3 viewDir = normalize(lightingData.viewPos.xyz - input.worldPos);
     float4 diffuseSample = SampleDiffuse(input.uv);
+    float3 ambient = lightingData.directionalLight.ambient.rgb * diffuseSample.rgb;
     float opacity = diffuseSample.a * SampleOpacity(input.uv);
 
   // The shader supports the three major glTF alpha modes used by the renderer:
@@ -151,8 +163,14 @@ float4 PSMain(PSInput input) : SV_TARGET
         opacity = 1.0f;
     }
 
+    DirectLightResult directLight = CalcDirLight(lightingData.directionalLight, norm, viewDir, input.uv);
     float shadow = ComputeShadowVisibility(input.worldPos);
-    float3 result = CalcDirLight(lightingData.directionalLight, norm, viewDir, input.uv) * shadow;
+
+    // Shadow visibility comes from PCF, so it is already a soft 0..1 value.
+    // We use it directly for diffuse, but square it for specular so highlights
+    // disappear sooner inside penumbra and full shadow.
+    float specularShadow = shadow * shadow;
+    float3 result = ambient + directLight.diffuse * shadow + directLight.specular * specularShadow;
 
     const float gamma = 2.2f;
     float3 gammaCorrected = pow(saturate(result), 1.0f / gamma);
@@ -180,8 +198,9 @@ float SampleOpacity(float2 uv)
     return 1.0f;
 }
 
-float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv)
+DirectLightResult CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv)
 {
+    DirectLightResult result;
     float3 albedo = SampleDiffuse(uv).rgb;
     float3 specMap = float3(1.0f, 1.0f, 1.0f);
 
@@ -196,11 +215,10 @@ float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, f
     float3 halfwayDir = normalize(lightDir + viewDir);
     float spec = pow(max(dot(normal, halfwayDir), 0.0f), 0.6f * 128.0f);
 
-    float3 ambient = light.ambient.rgb * albedo;
-    float3 diffuse = light.diffuse.rgb * diff * albedo;
-    float3 specular = light.specular.rgb * spec * specMap;
+    result.diffuse = light.diffuse.rgb * diff * albedo;
+    result.specular = light.specular.rgb * spec * specMap;
 
-    return ambient + diffuse + specular;
+    return result;
 }
 
 float ComputeShadowVisibility(float3 worldPos)
@@ -233,7 +251,10 @@ float ComputeShadowVisibility(float3 worldPos)
 
     // PCF = Percentage Closer Filtering.
     // Instead of one hard compare, sample a small 3x3 neighborhood and average.
-    // This makes shadow edges look softer and less jagged.
+    // The returned value is a soft visibility factor in the 0..1 range:
+    //   1.0 -> fully lit
+    //   0.0 -> fully shadowed
+    // values in-between -> penumbra / softened edge
     float2 texelSize = 1.0f / float2(shadowMapWidth, shadowMapHeight);
     float currentDepth = shadowPos.z - lightingData.shadowParams.y;
     float litSampleCount = 0.0f;
@@ -250,7 +271,7 @@ float ComputeShadowVisibility(float3 worldPos)
         }
     }
 
-    return lerp(0.25f, 1.0f, litSampleCount / 9.0f);
+    return litSampleCount / 9.0f;
 }
 
 GridPSInput GridVSMain(GridVSInput input)
