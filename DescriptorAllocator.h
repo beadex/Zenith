@@ -217,3 +217,33 @@ public:
 	{
 	}
 };
+
+class DescriptorManager
+{
+public:
+	explicit DescriptorManager(UINT frameCount)
+		: m_cbvSrvUavAllocator(frameCount)
+		, m_rtvAllocator(frameCount)
+		, m_dsvAllocator(1)
+	{
+	}
+
+	void Initialize(ID3D12Device* device)
+	{
+		m_cbvSrvUavAllocator.Initialize(device);
+		m_rtvAllocator.Initialize(device);
+		m_dsvAllocator.Initialize(device);
+	}
+
+	CbvSrvUavAllocator* GetCbvSrvUavAllocator() { return &m_cbvSrvUavAllocator; }
+	const CbvSrvUavAllocator* GetCbvSrvUavAllocator() const { return &m_cbvSrvUavAllocator; }
+	RenderTargetAllocator* GetRtvAllocator() { return &m_rtvAllocator; }
+	const RenderTargetAllocator* GetRtvAllocator() const { return &m_rtvAllocator; }
+	DepthStencilAllocator* GetDsvAllocator() { return &m_dsvAllocator; }
+	const DepthStencilAllocator* GetDsvAllocator() const { return &m_dsvAllocator; }
+
+private:
+	CbvSrvUavAllocator m_cbvSrvUavAllocator;
+	RenderTargetAllocator m_rtvAllocator;
+	DepthStencilAllocator m_dsvAllocator;
+};

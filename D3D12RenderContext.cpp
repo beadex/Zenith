@@ -160,12 +160,10 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 
 	// Create descriptor heap for render target views (RTVs)
 	{
-        m_rtvHeap = std::make_unique<RenderTargetAllocator>(FrameCount);
-		m_rtvHeap->Initialize(m_device.Get());
-		m_rtvDescriptorSize = m_rtvHeap->GetDescriptorSize();
-
-		m_dsvHeap = std::make_unique<DepthStencilAllocator>(1);
-		m_dsvHeap->Initialize(m_device.Get());
+		m_descriptorManager = std::make_unique<DescriptorManager>(FrameCount);
+		m_descriptorManager->Initialize(m_device.Get());
+		auto* rtvAllocator = m_descriptorManager->GetRtvAllocator();
+		auto* dsvAllocator = m_descriptorManager->GetDsvAllocator();
 
 		D3D12_RESOURCE_DESC depthDesc = {};
 		depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -190,20 +188,19 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 			IID_PPV_ARGS(&m_depthBuffer)
 		));
 
-        m_device->CreateDepthStencilView(m_depthBuffer.Get(), nullptr, m_dsvHeap->GetCpuHandle(0));
+		m_device->CreateDepthStencilView(m_depthBuffer.Get(), nullptr, dsvAllocator->GetCpuHandle(0));
 
-		m_dsvDescriptorSize = m_dsvHeap->GetDescriptorSize();
-
-      m_descriptorAllocator = std::make_unique<CbvSrvUavAllocator>(FrameCount);
-		m_descriptorAllocator->Initialize(m_device.Get());
+		m_rtvDescriptorSize = rtvAllocator->GetDescriptorSize();
+		m_dsvDescriptorSize = dsvAllocator->GetDescriptorSize();
 	}
 
 	// Create render target views (RTVs) for each frame in the swap chain
 	{
+		auto* rtvAllocator = m_descriptorManager->GetRtvAllocator();
 		for (UINT n = 0; n < FrameCount; n++)
 		{
 			ThrowIfFailed(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])));
-         m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, m_rtvHeap->GetCpuHandle(n));
+			m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvAllocator->GetCpuHandle(n));
 
 			ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n])));
 		}
@@ -245,7 +242,7 @@ void D3D12RenderContext::Prepare()
 	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(),
 		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 	m_commandList->ResourceBarrier(1, &barrier);
-	m_descriptorAllocator->BeginFrame(m_frameIndex);
+	m_descriptorManager->GetCbvSrvUavAllocator()->BeginFrame(m_frameIndex);
 }
 
 bool D3D12RenderContext::Present(const std::wstring& capturePath)

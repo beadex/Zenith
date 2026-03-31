@@ -43,16 +43,16 @@ public:
 	UINT GetCurrentFrameIndex() const { return m_frameIndex; }
 	D3D12_CPU_DESCRIPTOR_HANDLE GetRtvHeapStart() const
 	{
-		return m_rtvHeap->GetCpuHandle(0);
+		return m_descriptorManager->GetRtvAllocator()->GetCpuHandle(0);
 	}
 	UINT GetRtvDescriptorSize() const { return m_rtvDescriptorSize; };
 
 	D3D12_CPU_DESCRIPTOR_HANDLE GetDsvHeapStart() const
 	{
-		return m_dsvHeap->GetCpuHandle(0);
+		return m_descriptorManager->GetDsvAllocator()->GetCpuHandle(0);
 	}
 	UINT GetDsvDescriptorSize() const { return m_dsvDescriptorSize; };
-	CbvSrvUavAllocator* GetDescriptorAllocator() const { return m_descriptorAllocator.get(); }
+	DescriptorManager* GetDescriptorManager() const { return m_descriptorManager.get(); }
 
 private:
 	ComPtr<IDXGIFactory4> m_factory;
@@ -70,15 +70,13 @@ private:
 	ComPtr<ID3D12Device> m_device;
 	ComPtr<ID3D12CommandQueue> m_commandQueue;
 	ComPtr<IDXGISwapChain3> m_swapChain;
-	std::unique_ptr<RenderTargetAllocator> m_rtvHeap;
-	std::unique_ptr<DepthStencilAllocator> m_dsvHeap;
 	UINT m_rtvDescriptorSize;
 	UINT m_dsvDescriptorSize;
 	ComPtr<ID3D12Resource> m_depthBuffer;
 	ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
 	ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
 	ComPtr<ID3D12GraphicsCommandList> m_commandList;
-	std::unique_ptr<CbvSrvUavAllocator> m_descriptorAllocator;
+	std::unique_ptr<DescriptorManager> m_descriptorManager;
 
 	// Synchronization objects
 	UINT m_frameIndex;

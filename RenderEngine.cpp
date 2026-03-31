@@ -400,9 +400,10 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 	m_modelOffset = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
 	auto device = m_renderContext->GetDevice();
+	auto descriptorManager = m_renderContext->GetDescriptorManager();
 	m_renderContext->BeginUpload();
 	auto commandList = m_renderContext->GetCommandList();
-	auto model = std::make_unique<Model>(m_renderContext->GetDescriptorAllocator(), device, commandList, WideToUtf8(path));
+	auto model = std::make_unique<Model>(descriptorManager->GetCbvSrvUavAllocator(), device, commandList, WideToUtf8(path));
 	m_renderContext->EndUpload();
 
 	if (!model->IsLoaded())
@@ -477,7 +478,7 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	// 2. Set the root signature for rendering
 	commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 	auto device = m_renderContext->GetDevice();
-	auto descriptorAllocator = m_renderContext->GetDescriptorAllocator();
+	auto descriptorAllocator = m_renderContext->GetDescriptorManager()->GetCbvSrvUavAllocator();
 	const UINT sceneDescriptorIndex = descriptorAllocator->AllocateDynamicDescriptor();
 	D3D12_CONSTANT_BUFFER_VIEW_DESC sceneCbvDesc = {};
 	sceneCbvDesc.BufferLocation = m_sceneDataConstantBuffer->GetGPUVirtualAddress();
