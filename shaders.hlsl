@@ -19,11 +19,18 @@ struct MaterialData
     uint numDiffuse;
     uint numSpecular;
     uint numOpacity;
-    uint padding0;
-    uint padding1;
+    // Matches the C++ MaterialAlphaMode* constants.
+    uint alphaMode;
+    // Used only for glTF alphaMode = MASK.
+    float alphaCutoff;
+    // Lightweight glTF support: material tint and alpha factor.
     float4 baseColorFactor;
 };
 ConstantBuffer<MaterialData> materialData : register(b1);
+
+static const uint ALPHA_MODE_OPAQUE = 0u;
+static const uint ALPHA_MODE_MASK = 1u;
+static const uint ALPHA_MODE_BLEND = 2u;
 
 struct DirectionalLightData
 {
@@ -110,9 +117,25 @@ float4 PSMain(PSInput input) : SV_TARGET
     float4 diffuseSample = SampleDiffuse(input.uv);
     float opacity = diffuseSample.a * SampleOpacity(input.uv);
 
-    // Fully transparent texels should not update depth, otherwise hidden parts
-    // of cutout textures can still occlude geometry behind them.
-    clip(opacity - 0.01f);
+  // The shader supports the three major glTF alpha modes used by the renderer:
+    //   OPAQUE -> force alpha to 1
+    //   MASK   -> alpha test with cutoff, then write opaque result
+    //   BLEND  -> keep alpha for the transparent pass
+    if (materialData.alphaMode == ALPHA_MODE_MASK)
+    {
+        clip(opacity - materialData.alphaCutoff);
+        opacity = 1.0f;
+    }
+    else if (materialData.alphaMode == ALPHA_MODE_BLEND)
+    {
+        // Fully transparent texels should not update depth, otherwise hidden parts
+        // of cutout textures can still occlude geometry behind them.
+        clip(opacity - 0.01f);
+    }
+    else
+    {
+        opacity = 1.0f;
+    }
 
     float3 result = CalcDirLight(lightingData.directionalLight, norm, viewDir, input.uv);
 

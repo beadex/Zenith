@@ -29,9 +29,18 @@ private:
 	CD3DX12_VIEWPORT m_viewport;
 	CD3DX12_RECT m_scissorRect;
 
+    // The renderer now keeps four model PSOs instead of one so it can route each
+	// mesh by two independent material properties:
+	//   1. opaque vs. transparent
+	//   2. single-sided vs. double-sided
+	//
+	// This avoids the old "one transparent PSO for everything" behavior, which
+	// was simple but forced all transparent meshes to render with culling disabled.
 	ComPtr<ID3D12RootSignature> m_rootSignature;
 	ComPtr<ID3D12PipelineState> m_pipelineState;
+	ComPtr<ID3D12PipelineState> m_doubleSidedPipelineState;
 	ComPtr<ID3D12PipelineState> m_transparentPipelineState;
+	ComPtr<ID3D12PipelineState> m_doubleSidedTransparentPipelineState;
 	ComPtr<ID3D12PipelineState> m_gridPipelineState;
 
 	std::unique_ptr<Model> m_model;
@@ -87,7 +96,9 @@ private:
 
 	void CreateRootSignature();
 	void CreatePipelineState();
+	void CreateDoubleSidedPipelineState();
 	void CreateTransparentPipelineState();
+	void CreateDoubleSidedTransparentPipelineState();
 	void CreateGridPipelineState();
 	void CreateSceneDataConstantBuffer();
 	void CreateLightingDataConstantBuffer();

@@ -15,14 +15,17 @@
 //   - UPLOAD heaps   -> CPU-visible staging memory used to initialize them
 // ---------------------------------------------------------------------------
 
-Mesh::Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures, bool isTransparent) :
+Mesh::Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures, bool isTransparent, bool isDoubleSided) :
 	m_vertices(std::move(vertices)),
 	m_indices(std::move(indices)),
 	m_textures(std::move(textures)),
 	m_vertexCount(static_cast<UINT>(m_vertices.size())),
 	m_indexCount(static_cast<UINT>(m_indices.size())),
-	m_isTransparent(isTransparent)
+	m_isTransparent(isTransparent),
+	m_isDoubleSided(isDoubleSided)
 {
+    // Cache a simple center point for this mesh. Transparent meshes are later
+	// sorted back-to-front using this center as an inexpensive approximation.
 	if (!m_vertices.empty())
 	{
 		XMFLOAT3 boundsMin(FLT_MAX, FLT_MAX, FLT_MAX);
@@ -59,12 +62,16 @@ void Mesh::Draw(ID3D12GraphicsCommandList* commandList)
 
 void Mesh::SetMaterialData(const MaterialData& data)
 {
+ // The material constant buffer is kept persistently mapped, so updating the
+	// shader-visible material state is just a memcpy into CPU-visible upload memory.
 	OutputDebugStringA(("SetMaterialData: diffuseStart=" + std::to_string(data.diffuseStartIndex) +
 		" numDiffuse=" + std::to_string(data.numDiffuse) +
 		" specularStart=" + std::to_string(data.specularStartIndex) +
 		" numSpecular=" + std::to_string(data.numSpecular) +
 		" opacityStart=" + std::to_string(data.opacityStartIndex) +
-      " numOpacity=" + std::to_string(data.numOpacity) +
+		" numOpacity=" + std::to_string(data.numOpacity) +
+		" alphaMode=" + std::to_string(data.alphaMode) +
+		" alphaCutoff=" + std::to_string(data.alphaCutoff) +
 		" baseAlpha=" + std::to_string(data.baseColorFactor.w) + "\n").c_str());
 	m_materialData = data;
 	// m_mappedMaterialData luôn valid vì giữ mapped suốt lifetime

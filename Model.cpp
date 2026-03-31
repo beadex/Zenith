@@ -6,9 +6,18 @@ using namespace DirectX;
 
 namespace
 {
- bool TextureUsesTransparency(const ScratchImage& image)
+ // These values intentionally match the shader-side constants in shaders.hlsl.
+	constexpr UINT MaterialAlphaModeOpaque = 0;
+	constexpr UINT MaterialAlphaModeMask = 1;
+	constexpr UINT MaterialAlphaModeBlend = 2;
+
+ // Having an alpha channel is not the same thing as actually using it.
+	// Many glTF base-color textures are stored as RGBA even when every texel is
+	// fully opaque. This helper scans the decoded pixels so only materials that
+	// really use transparency are routed into the transparent pass.
+	bool TextureUsesTransparency(const ScratchImage& image)
 	{
-       const TexMetadata& metadata = image.GetMetadata();
+		const TexMetadata& metadata = image.GetMetadata();
 		if (!DirectX::HasAlpha(metadata.format))
 		{
 			return false;
@@ -42,8 +51,16 @@ namespace
 
 	void DrawMesh(ID3D12GraphicsCommandList* commandList, Mesh& mesh)
 	{
+     // Root slot 2 is the per-mesh MaterialData root CBV.
 		commandList->SetGraphicsRootConstantBufferView(2, mesh.GetMaterialConstantBufferAddress());
 		mesh.Draw(commandList);
+	}
+
+    // Rendering is split by both transparency and double-sided state so the caller
+	// can choose the correct PSO before drawing a subset of meshes.
+	bool MeshMatchesRenderPass(const Mesh& mesh, bool transparent, bool doubleSided)
+	{
+		return mesh.IsTransparent() == transparent && mesh.IsDoubleSided() == doubleSided;
 	}
 }
 
@@ -83,25 +100,27 @@ Model::~Model()
 	}
 }
 
-void Model::DrawOpaque(ID3D12GraphicsCommandList* commandList)
+void Model::DrawOpaque(ID3D12GraphicsCommandList* commandList, bool doubleSided)
 {
+ // Opaque geometry is not sorted; it relies on normal depth writes.
 	for (auto& mesh : m_meshes)
 	{
-		if (!mesh.IsTransparent())
+		if (MeshMatchesRenderPass(mesh, false, doubleSided))
 		{
 			DrawMesh(commandList, mesh);
 		}
 	}
 }
 
-void Model::DrawTransparent(ID3D12GraphicsCommandList* commandList, const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset)
+void Model::DrawTransparent(ID3D12GraphicsCommandList* commandList, const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset, bool doubleSided)
 {
+   // Transparent geometry is collected first, then sorted back-to-front.
 	std::vector<Mesh*> transparentMeshes;
 	transparentMeshes.reserve(m_meshes.size());
 
 	for (auto& mesh : m_meshes)
 	{
-		if (mesh.IsTransparent())
+		if (MeshMatchesRenderPass(mesh, true, doubleSided))
 		{
 			transparentMeshes.push_back(&mesh);
 		}
@@ -262,6 +281,13 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 	{
 		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
 		MaterialData materialData = {};
+        // glTF stores transparency in several different places. The lightweight
+		// path implemented here supports the major ones without going full PBR:
+		//   - baseColorFactor alpha
+		//   - baseColor texture alpha
+		//   - opacity texture
+		//   - explicit glTF alphaMode / alphaCutoff
+		//   - doubleSided
 		aiColor4D baseColor(1.0f, 1.0f, 1.0f, 1.0f);
 		if (material->Get(AI_MATKEY_BASE_COLOR, baseColor) != aiReturn_SUCCESS)
 		{
@@ -272,25 +298,39 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		const aiTextureType diffuseTextureType =
 			material->GetTextureCount(aiTextureType_BASE_COLOR) > 0 ? aiTextureType_BASE_COLOR : aiTextureType_DIFFUSE;
 
+     // When glTF alphaMode exists, it is treated as the authoritative source for
+		// pass selection. Only materials without an explicit alphaMode fall back to
+		// older heuristics.
 		aiString alphaMode;
 		const bool hasExplicitAlphaMode = material->Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == aiReturn_SUCCESS;
 		const bool isBlendAlphaMode = hasExplicitAlphaMode && _stricmp(alphaMode.C_Str(), "BLEND") == 0;
 		const bool isMaskAlphaMode = hasExplicitAlphaMode && _stricmp(alphaMode.C_Str(), "MASK") == 0;
-		const bool isOpaqueAlphaMode = hasExplicitAlphaMode && _stricmp(alphaMode.C_Str(), "OPAQUE") == 0;
+		int isDoubleSidedMaterial = 0;
+		material->Get(AI_MATKEY_TWOSIDED, isDoubleSidedMaterial);
+		const bool isDoubleSided = isDoubleSidedMaterial != 0;
 
 		bool isTransparent = false;
 		if (isBlendAlphaMode)
 		{
+			materialData.alphaMode = MaterialAlphaModeBlend;
 			isTransparent = true;
+		}
+		else if (isMaskAlphaMode)
+		{
+			materialData.alphaMode = MaterialAlphaModeMask;
+			material->Get(AI_MATKEY_GLTF_ALPHACUTOFF, materialData.alphaCutoff);
+		}
+		else if (hasExplicitAlphaMode)
+		{
+			materialData.alphaMode = MaterialAlphaModeOpaque;
 		}
 		else if (!hasExplicitAlphaMode)
 		{
 			isTransparent = material->GetTextureCount(aiTextureType_OPACITY) > 0;
 			isTransparent = isTransparent || materialData.baseColorFactor.w < 0.999f;
+			materialData.alphaMode = isTransparent ? MaterialAlphaModeBlend : MaterialAlphaModeOpaque;
 		}
 
-		UNREFERENCED_PARAMETER(isMaskAlphaMode);
-		UNREFERENCED_PARAMETER(isOpaqueAlphaMode);
 		textures.reserve(
 			material->GetTextureCount(diffuseTextureType) +
 			material->GetTextureCount(aiTextureType_SPECULAR) +
@@ -300,9 +340,10 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		std::vector<Texture> diffuseMaps = LoadMaterialTextures(material, diffuseTextureType, "texture_diffuse", scene);
 		for (auto& tex : diffuseMaps)
 		{
-          if (!hasExplicitAlphaMode)
+			if (!hasExplicitAlphaMode)
 			{
 				isTransparent = isTransparent || tex.hasAlpha;
+				materialData.alphaMode = isTransparent ? MaterialAlphaModeBlend : MaterialAlphaModeOpaque;
 			}
 			textures.push_back(std::move(tex));
 		}
@@ -315,19 +356,20 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		std::vector<Texture> opacityMaps = LoadMaterialTextures(material, aiTextureType_OPACITY, "texture_opacity", scene);
 		for (auto& tex : opacityMaps)
 		{
-           if (!hasExplicitAlphaMode)
+			if (!hasExplicitAlphaMode)
 			{
 				isTransparent = true;
+				materialData.alphaMode = MaterialAlphaModeBlend;
 			}
 			textures.push_back(std::move(tex));
 		}
 
-		Mesh result(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), isTransparent);
+		Mesh result(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), isTransparent, isDoubleSided);
 		result.SetMaterialData(materialData);
 		return result;
 	}
 
-	Mesh result(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), false);
+	Mesh result(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), false, false);
 	result.SetMaterialData(MaterialData{});
 	return result;
 }
@@ -453,7 +495,9 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 			}
 		}
 
-       texture.hasAlpha = (type == aiTextureType_OPACITY) || TextureUsesTransparency(texture.image);
+       // Opacity maps are always treated as transparency-driving textures. Other
+		// textures are classified only if they actually contain non-opaque alpha.
+		texture.hasAlpha = (type == aiTextureType_OPACITY) || TextureUsesTransparency(texture.image);
 		m_textureTransparencyCache[texture.path] = texture.hasAlpha;
 
 		textures.push_back(std::move(texture));
@@ -467,6 +511,11 @@ void Model::UploadAllTexturesToGPU()
 	// Each mesh receives a compact MaterialData struct containing descriptor-slot
 	   // indices instead of direct texture objects. The shader later uses those
 	   // indices to fetch from the descriptor heap.
+ //
+	// Note that this step augments the MaterialData built earlier in ProcessMesh().
+	// The scalar fields such as alphaMode, alphaCutoff, and baseColorFactor are
+	// preserved, while the descriptor indices are filled in here after textures are
+	// uploaded and final heap slots are known.
 	for (int meshIdx = 0; meshIdx < m_meshes.size(); meshIdx++)
 	{
 		auto& mesh = m_meshes[meshIdx];
