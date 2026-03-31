@@ -4,42 +4,144 @@
 
 using namespace DirectX;
 
-Model::Model(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
+namespace
+{
+ // These values intentionally match the shader-side constants in shaders.hlsl.
+	constexpr UINT MaterialAlphaModeOpaque = 0;
+	constexpr UINT MaterialAlphaModeMask = 1;
+	constexpr UINT MaterialAlphaModeBlend = 2;
+
+ // Having an alpha channel is not the same thing as actually using it.
+	// Many glTF base-color textures are stored as RGBA even when every texel is
+	// fully opaque. This helper scans the decoded pixels so only materials that
+	// really use transparency are routed into the transparent pass.
+	bool TextureUsesTransparency(const ScratchImage& image)
+	{
+		const TexMetadata& metadata = image.GetMetadata();
+		if (!DirectX::HasAlpha(metadata.format))
+		{
+			return false;
+		}
+
+		bool hasTransparentPixel = false;
+		const HRESULT hr = DirectX::EvaluateImage(
+			image.GetImages(),
+			image.GetImageCount(),
+			metadata,
+			[&hasTransparentPixel](const XMVECTOR* pixels, size_t width, size_t y)
+			{
+				UNREFERENCED_PARAMETER(y);
+				if (hasTransparentPixel)
+				{
+					return;
+				}
+
+				for (size_t x = 0; x < width; ++x)
+				{
+					if (XMVectorGetW(pixels[x]) < 0.999f)
+					{
+						hasTransparentPixel = true;
+						return;
+					}
+				}
+			});
+
+		return SUCCEEDED(hr) && hasTransparentPixel;
+	}
+
+	void DrawMesh(ID3D12GraphicsCommandList* commandList, Mesh& mesh)
+	{
+     // Root slot 2 is the per-mesh MaterialData root CBV.
+		commandList->SetGraphicsRootConstantBufferView(2, mesh.GetMaterialConstantBufferAddress());
+		mesh.Draw(commandList);
+	}
+
+    // Rendering is split by both transparency and double-sided state so the caller
+	// can choose the correct PSO before drawing a subset of meshes.
+	bool MeshMatchesRenderPass(const Mesh& mesh, bool transparent, bool doubleSided)
+	{
+		return mesh.IsTransparent() == transparent && mesh.IsDoubleSided() == doubleSided;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Model
+//
+// A Model is a higher-level asset built from one or more Mesh objects.
+// Its job is to:
+//   - load geometry and materials through Assimp
+//   - compute bounds for camera framing
+//   - load and upload textures
+//   - assign texture descriptor indices into each mesh's MaterialData
+// ---------------------------------------------------------------------------
+
+Model::Model(CbvSrvUavAllocator* descriptorAllocator, ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
 	m_boundsMin(FLT_MAX, FLT_MAX, FLT_MAX),
 	m_boundsMax(-FLT_MAX, -FLT_MAX, -FLT_MAX),
+	m_descriptorAllocator(descriptorAllocator),
 	m_device(device),
 	m_commandList(commandList)
 {
 	LoadModel(path);
 }
 
-void Model::Draw(ID3D12GraphicsCommandList* commandList)
+Model::~Model()
 {
-	ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
-	commandList->SetDescriptorHeaps(1, heaps);
+	// Texture SRV descriptors live in the allocator's static heap. When the model
+	   // goes away, those slots can be returned to the free list and reused.
+	if (!m_descriptorAllocator)
+	{
+		return;
+	}
 
-	// Bind descriptor table (root param 0): toàn bộ heap
-	commandList->SetGraphicsRootDescriptorTable(
-		0,  // root parameter index — phải match Root Signature
-		m_srvHeap->GetGPUDescriptorHandleForHeapStart());
+	for (const auto& [_, slot] : m_textureCache)
+	{
+		m_descriptorAllocator->ReleaseStaticDescriptor(slot);
+	}
+}
 
-	// Loop through each mesh in the model and call its Draw method
+void Model::DrawOpaque(ID3D12GraphicsCommandList* commandList, bool doubleSided)
+{
+ // Opaque geometry is not sorted; it relies on normal depth writes.
 	for (auto& mesh : m_meshes)
 	{
-		// Root param 1: SceneData (b0) → bind ở ngoài Model::Draw, 
-		//               do caller (render loop) set trước khi gọi hàm này
+		if (MeshMatchesRenderPass(mesh, false, doubleSided))
+		{
+			DrawMesh(commandList, mesh);
+		}
+	}
+}
 
-		// Root param 2: MaterialData (b1) → đổi per mesh
-		commandList->SetGraphicsRootConstantBufferView(
-			2,
-			mesh.GetMaterialConstantBufferAddress()); // GPU address của constant buffer
+void Model::DrawTransparent(ID3D12GraphicsCommandList* commandList, const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset, bool doubleSided)
+{
+   // Transparent geometry is collected first, then sorted back-to-front.
+	std::vector<Mesh*> transparentMeshes;
+	transparentMeshes.reserve(m_meshes.size());
 
-		mesh.Draw(commandList);
+	for (auto& mesh : m_meshes)
+	{
+		if (MeshMatchesRenderPass(mesh, true, doubleSided))
+		{
+			transparentMeshes.push_back(&mesh);
+		}
+	}
+
+	std::sort(transparentMeshes.begin(), transparentMeshes.end(),
+		[&cameraPosition, &modelOffset](const Mesh* lhs, const Mesh* rhs)
+		{
+			return lhs->GetCameraDistanceSquared(cameraPosition, modelOffset) > rhs->GetCameraDistanceSquared(cameraPosition, modelOffset);
+		});
+
+	for (Mesh* mesh : transparentMeshes)
+	{
+		DrawMesh(commandList, *mesh);
 	}
 }
 
 void Model::LoadModel(const std::string& path)
 {
+	// Assimp converts the file into a scene graph. The code then walks that scene
+	  // and converts each aiMesh into the sample's own Mesh class.
 	Assimp::Importer importer;
 
 	unsigned int importFlags =
@@ -65,7 +167,7 @@ void Model::LoadModel(const std::string& path)
 	const size_t lastSeparator = path.find_last_of("\\/");
 	m_directory = (lastSeparator == std::string::npos) ? std::string() : path.substr(0, lastSeparator);
 
-	// Process the root node recursively
+	// Process the root node recursively and collect meshes / textures / bounds.
 	ProcessNode(scene->mRootNode, scene);
 
 	if (!m_meshes.empty())
@@ -81,13 +183,14 @@ void Model::LoadModel(const std::string& path)
 		m_boundsRadius = XMVectorGetX(XMVector3Length(maxV - centerV));
 	}
 
-	// After all the meshes and textures are loaded, create the SRV heap and upload textures to GPU
-	CreateSRVHeap();
+	// After all meshes are known, upload textures and assign descriptor indices.
 	UploadAllTexturesToGPU();
 }
 
 void Model::ProcessNode(aiNode* node, const aiScene* scene)
 {
+	// Assimp stores a hierarchy of nodes. Each node can reference meshes and can
+	// also have children, so the scene is traversed recursively.
 	OutputDebugStringA(("ProcessNode: " + std::string(node->mName.C_Str()) +
 		" meshes=" + std::to_string(node->mNumMeshes) +
 		" children=" + std::to_string(node->mNumChildren) + "\n").c_str());
@@ -107,6 +210,8 @@ void Model::ProcessNode(aiNode* node, const aiScene* scene)
 
 Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 {
+	// This function converts Assimp's aiMesh into CPU-side arrays that the Mesh
+	 // constructor will then upload to GPU buffers.
 	std::vector<Vertex> vertices;
 	std::vector<UINT> indices;
 	std::vector<Texture> textures;
@@ -170,29 +275,111 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		}
 	}
 
-	// Process material textures
+	// Gather diffuse/specular textures referenced by the material so they can be
+	// uploaded later and represented by descriptor indices in MaterialData.
 	if (mesh->mMaterialIndex >= 0)
 	{
 		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
-		textures.reserve(material->GetTextureCount(aiTextureType_DIFFUSE) + material->GetTextureCount(aiTextureType_SPECULAR));
+		MaterialData materialData = {};
+        // glTF stores transparency in several different places. The lightweight
+		// path implemented here supports the major ones without going full PBR:
+		//   - baseColorFactor alpha
+		//   - baseColor texture alpha
+		//   - opacity texture
+		//   - explicit glTF alphaMode / alphaCutoff
+		//   - doubleSided
+		aiColor4D baseColor(1.0f, 1.0f, 1.0f, 1.0f);
+		if (material->Get(AI_MATKEY_BASE_COLOR, baseColor) != aiReturn_SUCCESS)
+		{
+			material->Get(AI_MATKEY_COLOR_DIFFUSE, baseColor);
+		}
+		materialData.baseColorFactor = XMFLOAT4(baseColor.r, baseColor.g, baseColor.b, baseColor.a);
 
-		// Load diffuse textures
-		std::vector<Texture> diffuseMaps = LoadMaterialTextures(material, aiTextureType_DIFFUSE, "texture_diffuse", scene);
+		const aiTextureType diffuseTextureType =
+			material->GetTextureCount(aiTextureType_BASE_COLOR) > 0 ? aiTextureType_BASE_COLOR : aiTextureType_DIFFUSE;
+
+     // When glTF alphaMode exists, it is treated as the authoritative source for
+		// pass selection. Only materials without an explicit alphaMode fall back to
+		// older heuristics.
+		aiString alphaMode;
+		const bool hasExplicitAlphaMode = material->Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == aiReturn_SUCCESS;
+		const bool isBlendAlphaMode = hasExplicitAlphaMode && _stricmp(alphaMode.C_Str(), "BLEND") == 0;
+		const bool isMaskAlphaMode = hasExplicitAlphaMode && _stricmp(alphaMode.C_Str(), "MASK") == 0;
+		int isDoubleSidedMaterial = 0;
+		material->Get(AI_MATKEY_TWOSIDED, isDoubleSidedMaterial);
+		const bool isDoubleSided = isDoubleSidedMaterial != 0;
+
+		bool isTransparent = false;
+		if (isBlendAlphaMode)
+		{
+			materialData.alphaMode = MaterialAlphaModeBlend;
+			isTransparent = true;
+		}
+		else if (isMaskAlphaMode)
+		{
+			materialData.alphaMode = MaterialAlphaModeMask;
+			material->Get(AI_MATKEY_GLTF_ALPHACUTOFF, materialData.alphaCutoff);
+		}
+		else if (hasExplicitAlphaMode)
+		{
+			materialData.alphaMode = MaterialAlphaModeOpaque;
+		}
+		else if (!hasExplicitAlphaMode)
+		{
+			isTransparent = material->GetTextureCount(aiTextureType_OPACITY) > 0;
+			isTransparent = isTransparent || materialData.baseColorFactor.w < 0.999f;
+			materialData.alphaMode = isTransparent ? MaterialAlphaModeBlend : MaterialAlphaModeOpaque;
+		}
+
+		textures.reserve(
+			material->GetTextureCount(diffuseTextureType) +
+			material->GetTextureCount(aiTextureType_SPECULAR) +
+			material->GetTextureCount(aiTextureType_OPACITY));
+
+		// Load diffuse/base-color textures.
+		std::vector<Texture> diffuseMaps = LoadMaterialTextures(material, diffuseTextureType, "texture_diffuse", scene);
 		for (auto& tex : diffuseMaps)
+		{
+			if (!hasExplicitAlphaMode)
+			{
+				isTransparent = isTransparent || tex.hasAlpha;
+				materialData.alphaMode = isTransparent ? MaterialAlphaModeBlend : MaterialAlphaModeOpaque;
+			}
 			textures.push_back(std::move(tex));
+		}
 
 		// Load specular textures
 		std::vector<Texture> specularMaps = LoadMaterialTextures(material, aiTextureType_SPECULAR, "texture_specular", scene);
 		for (auto& tex : specularMaps)
 			textures.push_back(std::move(tex));
+
+		std::vector<Texture> opacityMaps = LoadMaterialTextures(material, aiTextureType_OPACITY, "texture_opacity", scene);
+		for (auto& tex : opacityMaps)
+		{
+			if (!hasExplicitAlphaMode)
+			{
+				isTransparent = true;
+				materialData.alphaMode = MaterialAlphaModeBlend;
+			}
+			textures.push_back(std::move(tex));
+		}
+
+		Mesh result(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), isTransparent, isDoubleSided);
+		result.SetMaterialData(materialData);
+		return result;
 	}
 
-	return Mesh(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures));
+	Mesh result(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), false, false);
+	result.SetMaterialData(MaterialData{});
+	return result;
 }
 
 std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType type, const std::string& typeName, const aiScene* scene)
 {
 	std::vector<Texture> textures;
+
+	// The cache prevents loading and uploading the same texture file multiple
+	// times when several meshes or materials reference it.
 
 	for (unsigned int i = 0; i < mat->GetTextureCount(type); i++)
 	{
@@ -218,6 +405,7 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 
 		if (m_loadedPaths.count(texture.path))
 		{
+			texture.hasAlpha = m_textureTransparencyCache[texture.path];
 			textures.push_back(std::move(texture));
 			continue;
 		}
@@ -226,6 +414,7 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 		if (m_textureCache.count(texture.path))
 		{
 			texture.heapIndex = m_textureCache[texture.path];
+			texture.hasAlpha = m_textureTransparencyCache[texture.path];
 			textures.push_back(std::move(texture));
 			continue; // skip load hoàn toàn — ScratchImage không bị tạo
 		}
@@ -306,33 +495,34 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 			}
 		}
 
+       // Opacity maps are always treated as transparency-driving textures. Other
+		// textures are classified only if they actually contain non-opaque alpha.
+		texture.hasAlpha = (type == aiTextureType_OPACITY) || TextureUsesTransparency(texture.image);
+		m_textureTransparencyCache[texture.path] = texture.hasAlpha;
+
 		textures.push_back(std::move(texture));
 	}
 
 	return textures;
 }
 
-void Model::CreateSRVHeap()
-{
-	D3D12_DESCRIPTOR_HEAP_DESC desc = {};
-	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = MAX_TEXTURES;
-	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	desc.NodeMask = 0;
-
-	ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_srvHeap)));
-	m_descriptorSize = m_device->GetDescriptorHandleIncrementSize(
-		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-}
-
 void Model::UploadAllTexturesToGPU()
 {
+	// Each mesh receives a compact MaterialData struct containing descriptor-slot
+	   // indices instead of direct texture objects. The shader later uses those
+	   // indices to fetch from the descriptor heap.
+ //
+	// Note that this step augments the MaterialData built earlier in ProcessMesh().
+	// The scalar fields such as alphaMode, alphaCutoff, and baseColorFactor are
+	// preserved, while the descriptor indices are filled in here after textures are
+	// uploaded and final heap slots are known.
 	for (int meshIdx = 0; meshIdx < m_meshes.size(); meshIdx++)
 	{
 		auto& mesh = m_meshes[meshIdx];
-		MaterialData matData = {};
+		MaterialData matData = mesh.GetMaterialData();
 		bool diffuseSet = false;
 		bool specularSet = false;
+		bool opacitySet = false;
 
 		OutputDebugStringA(("=== Mesh " + std::to_string(meshIdx) +
 			" has " + std::to_string(mesh.GetTextures().size()) + " textures ===\n").c_str());
@@ -358,6 +548,14 @@ void Model::UploadAllTexturesToGPU()
 					specularSet = true;
 				}
 			}
+			else if (tex.type == "texture_opacity")
+			{
+				if (!opacitySet) {
+					matData.opacityStartIndex = slot;
+					matData.numOpacity = 1;
+					opacitySet = true;
+				}
+			}
 		}
 
 		mesh.SetMaterialData(matData);
@@ -366,6 +564,8 @@ void Model::UploadAllTexturesToGPU()
 
 UINT Model::UploadTextureToHeap(Texture& texture)
 {
+	// If the texture was already uploaded, simply reuse the existing descriptor
+	// slot and avoid duplicate GPU resources.
 	OutputDebugStringA(("  [Upload] path='" + texture.path +
 		"' cached=" + std::to_string(m_textureCache.count(texture.path)) + "\n").c_str());
 	auto it = m_textureCache.find(texture.path);
@@ -376,21 +576,16 @@ UINT Model::UploadTextureToHeap(Texture& texture)
 		return it->second; // trả về slot cũ, không upload lại
 	}
 
-	if (m_nextFreeSlot >= MAX_TEXTURES)
-	{
-		throw std::runtime_error("Texture SRV heap capacity exceeded");
-	}
+	UINT slot = m_descriptorAllocator->AllocateStaticDescriptor();
 
-	UINT slot = m_nextFreeSlot++;
-
-	// Create a GPU resource for the texture
+	// Create the final GPU texture resource in default memory.
 	ComPtr<ID3D12Resource> textureResource;
 	ThrowIfFailed(DirectX::CreateTexture(
 		m_device,
 		texture.image.GetMetadata(),
 		&textureResource));
 
-	// Upload texture data to the GPU using an intermediate upload buffer
+	// Prepare subresource upload data, then stage it through an UPLOAD heap.
 	std::vector<D3D12_SUBRESOURCE_DATA> subresources;
 	ThrowIfFailed(DirectX::PrepareUpload(
 		m_device,
@@ -418,16 +613,14 @@ UINT Model::UploadTextureToHeap(Texture& texture)
 		uploadBuffer.Get(), 0, 0,
 		(UINT)subresources.size(), subresources.data());
 
-	// Barrier: COPY_DEST → PIXEL_SHADER_RESOURCE
+	// After the copy is recorded, transition so shaders can sample from it.
 	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 		textureResource.Get(),
 		D3D12_RESOURCE_STATE_COPY_DEST,
 		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 	m_commandList->ResourceBarrier(1, &barrier);
 
-	// Ghi SRV vào heap
-	D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
-	handle.ptr += slot * m_descriptorSize;
+	D3D12_CPU_DESCRIPTOR_HANDLE handle = m_descriptorAllocator->GetStaticCpuHandle(slot);
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Format = texture.image.GetMetadata().format;

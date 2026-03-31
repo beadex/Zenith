@@ -1,94 +1,91 @@
 #pragma once
 
+#include "DescriptorAllocator.h"
+
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
 
 class D3D12RenderContext
 {
 public:
-    // FrameCount thường là 2 cho Double Buffering hoặc 3 cho Triple Buffering
-    static const UINT FrameCount = 2;
-    static const UINT MaxTextures = 1024;
+	// FrameCount thường là 2 cho Double Buffering hoặc 3 cho Triple Buffering
+	static const UINT FrameCount = 2;
 
-    D3D12RenderContext(UINT width, UINT height);
-    ~D3D12RenderContext();
+	D3D12RenderContext(UINT width, UINT height);
+	~D3D12RenderContext();
 
 	// Intialize the D3D12 context with the given window handle and whether to use WARP (software rendering)
-    void Initialize(HWND hwnd, bool useWarp);
+	void Initialize(HWND hwnd, bool useWarp);
 
 	// Begin the upload process for resources (Reset command allocator, command list, etc.)
-    void BeginUpload();
+	void BeginUpload();
 
 	// End the upload process and execute the command list to upload resources to the GPU (Close command list, execute, wait for GPU, etc.)
 	void EndUpload();
 
 	// Prepare command list for rendering (Reset command allocator, command list, set render target, etc.)
-    void Prepare();
+	void Prepare();
 
 	// Finish rendering and present the frame (Execute command list, present swap chain, signal fence, etc.)
- bool Present(const std::wstring& capturePath = L"");
+	bool Present(const std::wstring& capturePath = L"");
 
 	// Wait for GPU to finish processing the current frame (Wait for fence, reset command allocator, etc.)
-    void WaitForGpu();
+	void WaitForGpu();
 
 	// Move to the next frame in the swap chain (Signal fence, update frame index, wait for next frame, etc.)
-    void MoveToNextFrame();
+	void MoveToNextFrame();
 
-    // Setters & Getters
-    void SetUseWarp(bool useWarp) { m_useWarp = useWarp; }
+	// Setters & Getters
+	void SetUseWarp(bool useWarp) { m_useWarp = useWarp; }
 
-    ID3D12Device* GetDevice() const { return m_device.Get(); }
-    ID3D12GraphicsCommandList* GetCommandList() const { return m_commandList.Get(); }
-    UINT GetCurrentFrameIndex() const { return m_frameIndex; }
-    D3D12_CPU_DESCRIPTOR_HANDLE GetRtvHeapStart() const
-    {
-        return m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
-    }
-    UINT GetRtvDescriptorSize() const { return m_rtvDescriptorSize; };
+	ID3D12Device* GetDevice() const { return m_device.Get(); }
+	ID3D12GraphicsCommandList* GetCommandList() const { return m_commandList.Get(); }
+	UINT GetCurrentFrameIndex() const { return m_frameIndex; }
+	D3D12_CPU_DESCRIPTOR_HANDLE GetRtvHeapStart() const
+	{
+		return m_descriptorManager->GetRtvAllocator()->GetCpuHandle(0);
+	}
+	UINT GetRtvDescriptorSize() const { return m_rtvDescriptorSize; };
 
-    D3D12_CPU_DESCRIPTOR_HANDLE GetDsvHeapStart() const
-    {
-        return m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+	D3D12_CPU_DESCRIPTOR_HANDLE GetDsvHeapStart() const
+	{
+		return m_descriptorManager->GetDsvAllocator()->GetCpuHandle(0);
 	}
 	UINT GetDsvDescriptorSize() const { return m_dsvDescriptorSize; };
-
-    D3D12_CPU_DESCRIPTOR_HANDLE GetCbvSrvHeapStart() const
-    {
-        return m_cbvSrvHeap->GetCPUDescriptorHandleForHeapStart();
-	}
-	UINT GetCbvSrvDescriptorSize() const { return m_cbvSrvDescriptorSize; };
-    ID3D12DescriptorHeap* GetCbvSrvHeap() const { return m_cbvSrvHeap.Get(); }
+	CbvSrvUavAllocator* GetCbvSrvUavAllocator() const { return m_descriptorManager->GetCbvSrvUavAllocator(); }
+	RenderTargetAllocator* GetRtvAllocator() const { return m_descriptorManager->GetRtvAllocator(); }
+	DepthStencilAllocator* GetDsvAllocator() const { return m_descriptorManager->GetDsvAllocator(); }
+	UINT Get4xMsaaQuality() const { return m_4xMsaaQuality; }
 
 private:
-    ComPtr<IDXGIFactory4> m_factory;
+	ComPtr<IDXGIFactory4> m_factory;
 
-    void CreateDevice(bool useWarp);
-    void CreateResources(HWND hwnd);
-    void GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAdapter1** ppAdapter, bool requestHighPerformanceAdapter = false);
+	void CreateDevice(bool useWarp);
+	void CreateResources(HWND hwnd);
+	void GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAdapter1** ppAdapter, bool requestHighPerformanceAdapter = false);
 
-    // Kích thước buffer
-    UINT m_width;
-    UINT m_height;
-    bool m_useWarp;
+	// Kích thước buffer
+	UINT m_width;
+	UINT m_height;
+	bool m_useWarp;
 
-    // Pipeline objects
-    ComPtr<ID3D12Device> m_device;
-    ComPtr<ID3D12CommandQueue> m_commandQueue;
-    ComPtr<IDXGISwapChain3> m_swapChain;
-    ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
-    ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
-    ComPtr<ID3D12DescriptorHeap> m_cbvSrvHeap;
-    UINT m_rtvDescriptorSize;
-    UINT m_dsvDescriptorSize;
-	UINT m_cbvSrvDescriptorSize;
-    ComPtr<ID3D12Resource> m_depthBuffer;
-    ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
-    ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
-    ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	// Pipeline objects
+	ComPtr<ID3D12Device> m_device;
+	ComPtr<ID3D12CommandQueue> m_commandQueue;
+	ComPtr<IDXGISwapChain3> m_swapChain;
+	UINT m_rtvDescriptorSize;
+	UINT m_dsvDescriptorSize;
+	ComPtr<ID3D12Resource> m_depthBuffer;
+	ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
+	ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
+	ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	std::unique_ptr<DescriptorManager> m_descriptorManager;
+	UINT m_4xMsaaQuality = 0;
+	DXGI_FORMAT m_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
-    // Synchronization objects
-    UINT m_frameIndex;
-    HANDLE m_fenceEvent;
-    ComPtr<ID3D12Fence> m_fence;
-    UINT64 m_fenceValues[FrameCount];
+	// Synchronization objects
+	UINT m_frameIndex;
+	HANDLE m_fenceEvent;
+	ComPtr<ID3D12Fence> m_fence;
+	UINT64 m_fenceValues[FrameCount];
 };

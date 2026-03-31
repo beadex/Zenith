@@ -4,13 +4,31 @@
 
 #pragma comment(lib, "Windowscodecs.lib")
 
+// ---------------------------------------------------------------------------
+// D3D12RenderContext
+//
+// This file contains the low-level Direct3D 12 setup and frame plumbing:
+//   - device creation
+//   - swap chain creation
+//   - command queue / command list / command allocator setup
+//   - RTV / DSV creation
+//   - fence synchronization
+//   - frame begin / present transitions
+//
+// ZenithRenderEngine sits above this layer and uses it to record actual scene
+// rendering commands.
+// ---------------------------------------------------------------------------
+
 namespace
 {
+	// Helper used when the user chooses "Render Image".
+	 // The back buffer is copied into a readback buffer, then encoded as PNG.
 	bool SaveBufferAsPng(
 		ID3D12Resource* readbackBuffer,
 		const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint,
 		UINT width,
 		UINT height,
+		DXGI_FORMAT backBufferFormat,
 		const std::wstring& filePath)
 	{
 		BYTE* mappedData = nullptr;
@@ -20,23 +38,23 @@ namespace
 			return false;
 		}
 
-     const DirectX::Image image = {
-			width,
-			height,
-			DXGI_FORMAT_R8G8B8A8_UNORM,
-			footprint.Footprint.RowPitch,
-			static_cast<SIZE_T>(footprint.Footprint.RowPitch) * height,
-			mappedData
+		const DirectX::Image image = {
+			   width,
+			   height,
+			   DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+			   footprint.Footprint.RowPitch,
+			   static_cast<SIZE_T>(footprint.Footprint.RowPitch) * height,
+			   mappedData
 		};
 
 		const HRESULT hr = DirectX::SaveToWICFile(
 			image,
-			DirectX::WIC_FLAGS_NONE,
+			DirectX::WIC_FLAGS_FORCE_SRGB,
 			GetWICCodec(WIC_CODEC_PNG),
 			filePath.c_str());
 
 		readbackBuffer->Unmap(0, nullptr);
-     return SUCCEEDED(hr);
+		return SUCCEEDED(hr);
 	}
 }
 
@@ -46,6 +64,7 @@ D3D12RenderContext::D3D12RenderContext(UINT width, UINT height) :
 	m_useWarp(false),
 	m_frameIndex(0),
 	m_rtvDescriptorSize(0),
+	m_dsvDescriptorSize(0),
 	m_fenceValues{},
 	m_fenceEvent(nullptr)
 {
@@ -61,12 +80,17 @@ void D3D12RenderContext::Initialize(HWND hwnd, bool useWarp)
 {
 	m_useWarp = useWarp;
 
+	// Device creation and resource creation are split mainly to keep the code
+	  // easier to read: first create the GPU device/queue, then create the swap
+	  // chain, descriptor heaps, command list, fences, and related resources.
 	CreateDevice(useWarp);
 	CreateResources(hwnd);
 }
 
 void D3D12RenderContext::BeginUpload()
 {
+	// Upload work reuses the same direct command list in this sample. The code is
+	  // intentionally simple: open list, record copy commands, execute, then wait.
 	ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
 	ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr));
 }
@@ -76,12 +100,15 @@ void D3D12RenderContext::EndUpload()
 	ThrowIfFailed(m_commandList->Close());
 	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
 	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-	WaitForGpu(); // Stalls CPU until GPU finishes the copy
+	// This is conservative but beginner-friendly: we wait so the caller knows the
+	   // upload is finished before freeing staging resources.
+	WaitForGpu();
 }
 
 void D3D12RenderContext::CreateDevice(bool useWarp)
 {
-	// Enable the D3D12 debug layer if in debug mode
+	// The debug layer is one of the most useful learning tools in D3D12. It helps
+	// catch incorrect state transitions, binding mistakes, and resource misuse.
 	UINT dxgiFactoryFlags = 0;
 
 #if defined(_DEBUG)
@@ -98,6 +125,8 @@ void D3D12RenderContext::CreateDevice(bool useWarp)
 
 	if (m_useWarp)
 	{
+		// WARP is Microsoft's software rasterizer. It is much slower than hardware
+		 // but useful when no physical GPU is available or for debugging.
 		ComPtr<IDXGIAdapter> warpAdapter;
 		ThrowIfFailed(m_factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)));
 
@@ -109,6 +138,7 @@ void D3D12RenderContext::CreateDevice(bool useWarp)
 	}
 	else
 	{
+		// In the normal path, pick a hardware adapter that supports D3D12.
 		ComPtr<IDXGIAdapter1> hardwareAdapter;
 		GetHardwareAdapter(m_factory.Get(), &hardwareAdapter);
 
@@ -119,24 +149,39 @@ void D3D12RenderContext::CreateDevice(bool useWarp)
 		));
 	}
 
-	// Create command queue
+	// The command queue is where recorded command lists are submitted for GPU
+	   // execution. This sample uses a direct queue because it performs graphics work.
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
 	ThrowIfFailed(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
+
+	D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS msQualityLevels;
+	msQualityLevels.Format = m_backBufferFormat;
+	msQualityLevels.SampleCount = 4;
+	msQualityLevels.Flags = D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE;
+	msQualityLevels.NumQualityLevels = 0;
+	ThrowIfFailed(m_device->CheckFeatureSupport(
+		D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,
+		&msQualityLevels,
+		sizeof(msQualityLevels)));
+
+	m_4xMsaaQuality = msQualityLevels.NumQualityLevels;
+	assert(m_4xMsaaQuality > 0 && "Unexpected MSAA quality level.");
 }
 
 void D3D12RenderContext::CreateResources(HWND hwnd)
 {
-	const DXGI_SAMPLE_DESC sampleDesc = { 1, 0 };
-	// Create swap chain
+	const DXGI_SAMPLE_DESC sampleDesc = { m_4xMsaaQuality, m_4xMsaaQuality - 1 };
+	// The swap chain owns the back buffers that are presented to the window.
+	// Double buffering is used here via FrameCount = 2.
 	{
 		DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
 		swapChainDesc.BufferCount = FrameCount;
 		swapChainDesc.Width = m_width;
 		swapChainDesc.Height = m_height;
-		swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		swapChainDesc.Format = m_backBufferFormat;
 		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 		swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 		swapChainDesc.SampleDesc = sampleDesc;
@@ -157,22 +202,17 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 		m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 	}
 
-	// Create descriptor heap for render target views (RTVs)
+	// Create the descriptor manager and depth buffer resources.
+	// RTV/DSV descriptors are CPU-only descriptors used by OMSetRenderTargets,
+	// while the CBV/SRV/UAV allocator is used for shader-visible binding.
 	{
-		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-		rtvHeapDesc.NumDescriptors = FrameCount;
-		rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-		rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-		ThrowIfFailed(m_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&m_rtvHeap)));
+		m_descriptorManager = std::make_unique<DescriptorManager>(FrameCount);
+		m_descriptorManager->Initialize(m_device.Get());
+		auto* rtvAllocator = m_descriptorManager->GetRtvAllocator();
+		auto* dsvAllocator = m_descriptorManager->GetDsvAllocator();
 
-		m_rtvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
-		D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
-		dsvHeapDesc.NumDescriptors = 1;
-		dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-		dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-		ThrowIfFailed(m_device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&m_dsvHeap)));
-
+		// The depth buffer is a normal GPU texture resource. The DSV descriptor is
+		   // just the view that lets the pipeline treat that texture as a depth target.
 		D3D12_RESOURCE_DESC depthDesc = {};
 		depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 		depthDesc.Width = m_width;
@@ -196,41 +236,34 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 			IID_PPV_ARGS(&m_depthBuffer)
 		));
 
-		m_device->CreateDepthStencilView(m_depthBuffer.Get(), nullptr, m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+		m_device->CreateDepthStencilView(m_depthBuffer.Get(), nullptr, dsvAllocator->GetCpuHandle(0));
 
-		m_dsvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
-
-		D3D12_DESCRIPTOR_HEAP_DESC cbvSrvHeapDesc = {};
-		cbvSrvHeapDesc.NumDescriptors = MaxTextures;
-		cbvSrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		cbvSrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-		ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvSrvHeapDesc, IID_PPV_ARGS(&m_cbvSrvHeap)));
-
-		m_cbvSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		m_rtvDescriptorSize = rtvAllocator->GetDescriptorSize();
+		m_dsvDescriptorSize = dsvAllocator->GetDescriptorSize();
 	}
 
-	// Create render target views (RTVs) for each frame in the swap chain
+	// Each swap-chain back buffer gets its own RTV descriptor.
 	{
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart());
-
+		auto* rtvAllocator = m_descriptorManager->GetRtvAllocator();
 		for (UINT n = 0; n < FrameCount; n++)
 		{
 			ThrowIfFailed(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])));
-			m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvHandle);
-			rtvHandle.Offset(1, m_rtvDescriptorSize);
+			m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvAllocator->GetCpuHandle(n));
 
 			ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n])));
 		}
 	}
 
-	// Create command allocator and command list
+	// Create the main graphics command list. It starts in the open state, so we
+	// close it immediately because the frame loop expects to Reset() it later.
 	{
 
 		ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocators[m_frameIndex].Get(), nullptr, IID_PPV_ARGS(&m_commandList)));
 		m_commandList->Close();
 	}
 
-	// Create synchronization objects (fence and event)
+	// Fences are how the CPU knows whether the GPU has finished using resources
+	   // like command allocators or back buffers.
 	{
 		ThrowIfFailed(m_device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
 		m_fenceValues[m_frameIndex]++;
@@ -242,33 +275,40 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 			ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
 		}
 
-		// Wait for the command list to execute; we are reusing the same command 
-		// list in our main loop but for now, we just want to wait for setup to 
-		// complete before continuing.
+		// Wait once so initialization is fully complete before the app continues.
 		WaitForGpu();
 	}
 }
 
 void D3D12RenderContext::Prepare()
 {
-	// Reset command allocator and command list for the current frame
+	// Reset the allocator and command list so a fresh set of commands can be
+	 // recorded for the current frame.
 	ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
 	ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr));
 
-	// Transition from PRESENT to RENDER_TARGET state for the current back buffer
+	// D3D12 requires explicit state transitions. A back buffer cannot be rendered
+	 // to while still in PRESENT state.
 	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(),
 		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 	m_commandList->ResourceBarrier(1, &barrier);
+
+	// BeginFrame() copies all long-lived descriptors (for example texture SRVs)
+	// into the current shader-visible heap, then resets the dynamic allocation
+	// cursor so the renderer can append per-frame descriptors after them.
+	m_descriptorManager->GetCbvSrvUavAllocator()->BeginFrame(m_frameIndex);
 }
 
 bool D3D12RenderContext::Present(const std::wstring& capturePath)
 {
-   const bool captureRequested = !capturePath.empty();
+	const bool captureRequested = !capturePath.empty();
 	ComPtr<ID3D12Resource> readbackBuffer;
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
 
 	if (captureRequested)
 	{
+		// To save an image, the render target is copied into a READBACK buffer that
+		  // the CPU can map. The back buffer itself is not directly CPU-readable.
 		const D3D12_RESOURCE_DESC renderTargetDesc = m_renderTargets[m_frameIndex]->GetDesc();
 		UINT64 readbackBufferSize = 0;
 		m_device->GetCopyableFootprints(&renderTargetDesc, 0, 1, 0, &footprint, nullptr, nullptr, &readbackBufferSize);
@@ -306,7 +346,8 @@ bool D3D12RenderContext::Present(const std::wstring& capturePath)
 		m_commandList->ResourceBarrier(1, &backToRenderTarget);
 	}
 
-	// Transition from RENDER_TARGET to PRESENT state for the current back buffer
+	// After rendering, the back buffer must be returned to PRESENT state before
+	 // the swap chain can display it.
 	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 	m_commandList->ResourceBarrier(1, &barrier);
@@ -314,7 +355,7 @@ bool D3D12RenderContext::Present(const std::wstring& capturePath)
 	// Close the command list and execute it to render the frame
 	ThrowIfFailed(m_commandList->Close());
 
-	// Execute the command list
+	// Submit the finished command list to the queue.
 	ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
 	m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
@@ -330,25 +371,26 @@ bool D3D12RenderContext::Present(const std::wstring& capturePath)
 			footprint,
 			m_width,
 			m_height,
+			m_backBufferFormat,
 			capturePath);
 	}
 
-	// Signal and increment the fence value for the current frame
+	// Advance to the next frame and synchronize allocator/back-buffer reuse.
 	MoveToNextFrame();
-   return captureSucceeded;
+	return captureSucceeded;
 }
 
 // Prepare to render the next frame.
 void D3D12RenderContext::MoveToNextFrame()
 {
-	// Schedule a Signal command in the queue.
+	// Signal the fence value associated with the work just submitted.
 	const UINT64 currentFenceValue = m_fenceValues[m_frameIndex];
 	ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), currentFenceValue));
 
 	// Update the frame index.
 	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
-	// If the next frame is not ready to be rendered yet, wait until it is ready.
+	// If the next frame's allocator/back buffer is still in use by the GPU, wait.
 	if (m_fence->GetCompletedValue() < m_fenceValues[m_frameIndex])
 	{
 		ThrowIfFailed(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
@@ -362,7 +404,8 @@ void D3D12RenderContext::MoveToNextFrame()
 // Wait for pending GPU work to complete.
 void D3D12RenderContext::WaitForGpu()
 {
-	// Schedule a Signal command in the queue
+	// Full GPU flush. This is simple and safe, though not something a high-end
+	 // renderer would want to do every frame.
 	ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex]));
 
 	// Wait until the fence has been processed.
@@ -383,6 +426,7 @@ void D3D12RenderContext::GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAdapte
 
 	if (SUCCEEDED(pFactory->QueryInterface(IID_PPV_ARGS(&factory6))))
 	{
+		// Prefer a modern DXGI path that can ask for high-performance adapters.
 		for (
 			UINT adapterIndex = 0;
 			SUCCEEDED(factory6->EnumAdapterByGpuPreference(
@@ -404,7 +448,7 @@ void D3D12RenderContext::GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAdapte
 				continue;
 			}
 
-			// Check to see whether the adapter supports Direct3D 12, but don't create the actual device yet.
+			// Probe whether the adapter supports D3D12 without creating the final device yet.
 			if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
 			{
 				break;

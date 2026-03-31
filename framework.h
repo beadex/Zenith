@@ -20,6 +20,7 @@
 #include <assimp/Importer.hpp>      // C++ importer interface
 #include <assimp/scene.h>           // Output data structure
 #include <assimp/postprocess.h>     // Post processing flags
+#include <assimp/GltfMaterial.h>
 
 // C RunTime Header Files
 #include <iostream>
@@ -34,3 +35,4 @@
 #include <tchar.h>
 #include <commdlg.h>
 #include <algorithm>
+#include <cfloat>

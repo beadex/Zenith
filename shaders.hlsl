@@ -15,10 +15,22 @@ struct MaterialData
 {
     uint diffuseStartIndex;
     uint specularStartIndex;
+    uint opacityStartIndex;
     uint numDiffuse;
     uint numSpecular;
+    uint numOpacity;
+    // Matches the C++ MaterialAlphaMode* constants.
+    uint alphaMode;
+    // Used only for glTF alphaMode = MASK.
+    float alphaCutoff;
+    // Lightweight glTF support: material tint and alpha factor.
+    float4 baseColorFactor;
 };
 ConstantBuffer<MaterialData> materialData : register(b1);
+
+static const uint ALPHA_MODE_OPAQUE = 0u;
+static const uint ALPHA_MODE_MASK = 1u;
+static const uint ALPHA_MODE_BLEND = 2u;
 
 struct DirectionalLightData
 {
@@ -73,6 +85,8 @@ struct GridPSInput
     float3 color : COLOR;
 };
 
+float4 SampleDiffuse(float2 uv);
+float SampleOpacity(float2 uv);
 float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv);
 
 // ============================================================
@@ -100,23 +114,61 @@ float4 PSMain(PSInput input) : SV_TARGET
 {
     float3 norm = normalize(input.normal);
     float3 viewDir = normalize(lightingData.viewPos.xyz - input.worldPos);
+    float4 diffuseSample = SampleDiffuse(input.uv);
+    float opacity = diffuseSample.a * SampleOpacity(input.uv);
+
+  // The shader supports the three major glTF alpha modes used by the renderer:
+    //   OPAQUE -> force alpha to 1
+    //   MASK   -> alpha test with cutoff, then write opaque result
+    //   BLEND  -> keep alpha for the transparent pass
+    if (materialData.alphaMode == ALPHA_MODE_MASK)
+    {
+        clip(opacity - materialData.alphaCutoff);
+        opacity = 1.0f;
+    }
+    else if (materialData.alphaMode == ALPHA_MODE_BLEND)
+    {
+        // Fully transparent texels should not update depth, otherwise hidden parts
+        // of cutout textures can still occlude geometry behind them.
+        clip(opacity - 0.01f);
+    }
+    else
+    {
+        opacity = 1.0f;
+    }
 
     float3 result = CalcDirLight(lightingData.directionalLight, norm, viewDir, input.uv);
 
     const float gamma = 2.2f;
     float3 gammaCorrected = pow(saturate(result), 1.0f / gamma);
 
-    return float4(gammaCorrected, 1.0f);
+    return float4(gammaCorrected, opacity);
+}
+
+float4 SampleDiffuse(float2 uv)
+{
+    if (materialData.numDiffuse > 0)
+    {
+        return gTextures[materialData.diffuseStartIndex].Sample(g_sampler, uv) * materialData.baseColorFactor;
+    }
+
+    return materialData.baseColorFactor;
+}
+
+float SampleOpacity(float2 uv)
+{
+    if (materialData.numOpacity > 0)
+    {
+        return gTextures[materialData.opacityStartIndex].Sample(g_sampler, uv).r;
+    }
+
+    return 1.0f;
 }
 
 float3 CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv)
 {
-    float3 albedo = float3(1.0f, 1.0f, 1.0f);
+    float3 albedo = SampleDiffuse(uv).rgb;
     float3 specMap = float3(1.0f, 1.0f, 1.0f);
-    if (materialData.numDiffuse > 0)
-    {
-        albedo = gTextures[materialData.diffuseStartIndex].Sample(g_sampler, uv).rgb;
-    }
 
     if (materialData.numSpecular > 0)
     {
