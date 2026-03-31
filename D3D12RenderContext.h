@@ -52,7 +52,9 @@ public:
 		return m_descriptorManager->GetDsvAllocator()->GetCpuHandle(0);
 	}
 	UINT GetDsvDescriptorSize() const { return m_dsvDescriptorSize; };
-	DescriptorManager* GetDescriptorManager() const { return m_descriptorManager.get(); }
+	CbvSrvUavAllocator* GetCbvSrvUavAllocator() const { return m_descriptorManager->GetCbvSrvUavAllocator(); }
+	RenderTargetAllocator* GetRtvAllocator() const { return m_descriptorManager->GetRtvAllocator(); }
+	DepthStencilAllocator* GetDsvAllocator() const { return m_descriptorManager->GetDsvAllocator(); }
 
 private:
 	ComPtr<IDXGIFactory4> m_factory;

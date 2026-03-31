@@ -155,9 +155,10 @@ void ZenithRenderEngine::CreateRootSignature()
 		featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
 	}
 
-	CD3DX12_DESCRIPTOR_RANGE1 ranges[2];
+	CD3DX12_DESCRIPTOR_RANGE1 ranges[3];
 	ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
 	ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
+	ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 2, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
 
 	// 1. Tạo Root Signature
 	CD3DX12_ROOT_PARAMETER1 rootParameters[4];
@@ -171,9 +172,8 @@ void ZenithRenderEngine::CreateRootSignature()
 	rootParameters[2].InitAsConstantBufferView(1, 0,
 		D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC, D3D12_SHADER_VISIBILITY_PIXEL);
 
-	// Root param 3: LightingData b2 → pixel shader
-	rootParameters[3].InitAsConstantBufferView(2, 0,
-		D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC, D3D12_SHADER_VISIBILITY_PIXEL);
+	// Root param 3: LightingData b2 → dynamic CBV descriptor
+	rootParameters[3].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_PIXEL);
 
 	D3D12_STATIC_SAMPLER_DESC sampler = {};
 	sampler.Filter = D3D12_FILTER_ANISOTROPIC;
@@ -400,10 +400,10 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 	m_modelOffset = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
 	auto device = m_renderContext->GetDevice();
-	auto descriptorManager = m_renderContext->GetDescriptorManager();
+	auto cbvSrvUavAllocator = m_renderContext->GetCbvSrvUavAllocator();
 	m_renderContext->BeginUpload();
 	auto commandList = m_renderContext->GetCommandList();
-	auto model = std::make_unique<Model>(descriptorManager->GetCbvSrvUavAllocator(), device, commandList, WideToUtf8(path));
+	auto model = std::make_unique<Model>(cbvSrvUavAllocator, device, commandList, WideToUtf8(path));
 	m_renderContext->EndUpload();
 
 	if (!model->IsLoaded())
@@ -478,20 +478,25 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	// 2. Set the root signature for rendering
 	commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 	auto device = m_renderContext->GetDevice();
-	auto descriptorAllocator = m_renderContext->GetDescriptorManager()->GetCbvSrvUavAllocator();
-	const UINT sceneDescriptorIndex = descriptorAllocator->AllocateDynamicDescriptor();
+	auto cbvSrvUavAllocator = m_renderContext->GetCbvSrvUavAllocator();
+	const UINT sceneDescriptorIndex = cbvSrvUavAllocator->AllocateDynamicDescriptor();
+	const UINT lightingDescriptorIndex = cbvSrvUavAllocator->AllocateDynamicDescriptor();
 	D3D12_CONSTANT_BUFFER_VIEW_DESC sceneCbvDesc = {};
 	sceneCbvDesc.BufferLocation = m_sceneDataConstantBuffer->GetGPUVirtualAddress();
 	sceneCbvDesc.SizeInBytes = (sizeof(SceneDataConstantBuffer) + 255) & ~255;
-	device->CreateConstantBufferView(&sceneCbvDesc, descriptorAllocator->GetDynamicCpuHandle(sceneDescriptorIndex));
+	device->CreateConstantBufferView(&sceneCbvDesc, cbvSrvUavAllocator->GetDynamicCpuHandle(sceneDescriptorIndex));
+	D3D12_CONSTANT_BUFFER_VIEW_DESC lightingCbvDesc = {};
+	lightingCbvDesc.BufferLocation = m_lightingDataConstantBuffer->GetGPUVirtualAddress();
+	lightingCbvDesc.SizeInBytes = (sizeof(LightingDataConstantBuffer) + 255) & ~255;
+	device->CreateConstantBufferView(&lightingCbvDesc, cbvSrvUavAllocator->GetDynamicCpuHandle(lightingDescriptorIndex));
 
-	ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetShaderVisibleHeap() };
+	ID3D12DescriptorHeap* descriptorHeaps[] = { cbvSrvUavAllocator->GetShaderVisibleHeap() };
 	commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-	commandList->SetGraphicsRootDescriptorTable(0, descriptorAllocator->GetDynamicGpuHandle(0));
-	commandList->SetGraphicsRootDescriptorTable(1, descriptorAllocator->GetDynamicGpuHandle(sceneDescriptorIndex));
+	commandList->SetGraphicsRootDescriptorTable(0, cbvSrvUavAllocator->GetDynamicGpuHandle(0));
+	commandList->SetGraphicsRootDescriptorTable(1, cbvSrvUavAllocator->GetDynamicGpuHandle(sceneDescriptorIndex));
+	commandList->SetGraphicsRootDescriptorTable(3, cbvSrvUavAllocator->GetDynamicGpuHandle(lightingDescriptorIndex));
 
 	// 3. Update constant buffer with the latest transformation matrices (Model-View-Projection)
-	commandList->SetGraphicsRootConstantBufferView(3, m_lightingDataConstantBuffer->GetGPUVirtualAddress());
 
 	// 4. Set up scissor rect and viewport
 	commandList->RSSetViewports(1, &m_viewport);
