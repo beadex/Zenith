@@ -2,9 +2,9 @@
 #include "RenderEngine.h"
 #include "Win32Application.h"
 #include "D3D12ApplicationHelper.h"
+#include "DescriptorAllocator.h"
 
 #pragma comment(lib, "Comdlg32.lib")
-#pragma comment(lib, "d3dcompiler.lib")
 
 namespace
 {
@@ -64,7 +64,7 @@ void ZenithRenderEngine::OnInit()
 	CreateSceneDataConstantBuffer();
 	CreateLightingDataConstantBuffer();
 	CreateGridVertexBuffer();
-   UpdateLightingMenuState();
+	UpdateLightingMenuState();
 }
 
 bool ZenithRenderEngine::OnCommand(UINT commandId)
@@ -117,7 +117,7 @@ bool ZenithRenderEngine::OnCommand(UINT commandId)
 
 		return true;
 	}
-    case IDM_VIEW_DIRECTIONAL_LIGHT:
+	case IDM_VIEW_DIRECTIONAL_LIGHT:
 		m_directionalLightEnabled = !m_directionalLightEnabled;
 		UpdateLightingMenuState();
 		return true;
@@ -155,23 +155,23 @@ void ZenithRenderEngine::CreateRootSignature()
 		featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
 	}
 
-	CD3DX12_DESCRIPTOR_RANGE1 ranges[1];
+	CD3DX12_DESCRIPTOR_RANGE1 ranges[2];
 	ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
+	ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
 
 	// 1. Tạo Root Signature
 	CD3DX12_ROOT_PARAMETER1 rootParameters[4];
 	// Root param 0: SRV heap (texture array) → pixel shader
 	rootParameters[0].InitAsDescriptorTable(1, &ranges[0], D3D12_SHADER_VISIBILITY_PIXEL);
 
-	// Root param 1: SceneData b0 → vertex shader (CBV trực tiếp, không qua table)
-	rootParameters[1].InitAsConstantBufferView(0, 0,
-		D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC, D3D12_SHADER_VISIBILITY_VERTEX);
+	// Root param 1: SceneData b0 → dynamic CBV descriptor
+	rootParameters[1].InitAsDescriptorTable(1, &ranges[1], D3D12_SHADER_VISIBILITY_VERTEX);
 
-	// Root param 2: MaterialData b1 → pixel shader (CBV trực tiếp, không qua table)
+	// Root param 2: MaterialData b1 → pixel shader
 	rootParameters[2].InitAsConstantBufferView(1, 0,
 		D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC, D3D12_SHADER_VISIBILITY_PIXEL);
 
-	// Root param 3: LightingData b2 → pixel shader (CBV trực tiếp, không qua table)
+	// Root param 3: LightingData b2 → pixel shader
 	rootParameters[3].InitAsConstantBufferView(2, 0,
 		D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC, D3D12_SHADER_VISIBILITY_PIXEL);
 
@@ -396,13 +396,14 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 	}
 
 	m_renderContext->WaitForGpu();
+	m_renderContext->GetDescriptorAllocator()->ResetStaticDescriptors();
 	m_model.reset();
 	m_modelOffset = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
 	auto device = m_renderContext->GetDevice();
 	m_renderContext->BeginUpload();
 	auto commandList = m_renderContext->GetCommandList();
-	auto model = std::make_unique<Model>(device, commandList, WideToUtf8(path));
+	auto model = std::make_unique<Model>(m_renderContext->GetDescriptorAllocator(), device, commandList, WideToUtf8(path));
 	m_renderContext->EndUpload();
 
 	if (!model->IsLoaded())
@@ -412,9 +413,9 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 	}
 
 	const XMFLOAT3 boundsCenter = model->GetBoundsCenter();
-    const XMFLOAT3 boundsMin = model->GetBoundsMin();
+	const XMFLOAT3 boundsMin = model->GetBoundsMin();
 	const float boundsRadius = model->GetBoundsRadius();
-    m_modelOffset = XMFLOAT3(-boundsCenter.x, -boundsMin.y, -boundsCenter.z);
+	m_modelOffset = XMFLOAT3(-boundsCenter.x, -boundsMin.y, -boundsCenter.z);
 	m_camera.FrameBoundingSphere(XMFLOAT3(0.0f, boundsCenter.y - boundsMin.y, 0.0f), boundsRadius);
 	CreateGridVertexBuffer(boundsRadius);
 	model->ReleaseUploadBuffers();
@@ -447,7 +448,7 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 	XMStoreFloat4(&m_lightingDataCbData.viewPosition, m_camera.GetPosition());
 
 	m_lightingDataCbData.directionalLight.direction = XMFLOAT4(-0.2f, -1.0f, -0.3f, 1.0f);
-   if (m_directionalLightEnabled)
+	if (m_directionalLightEnabled)
 	{
 		m_lightingDataCbData.directionalLight.ambient = XMFLOAT4(0.2f, 0.2f, 0.2f, 1.0f);
 		m_lightingDataCbData.directionalLight.diffuse = XMFLOAT4(0.5f, 0.5f, 0.5f, 1.0f);
@@ -476,9 +477,20 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 
 	// 2. Set the root signature for rendering
 	commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+	auto device = m_renderContext->GetDevice();
+	auto descriptorAllocator = m_renderContext->GetDescriptorAllocator();
+	const UINT sceneDescriptorIndex = descriptorAllocator->AllocateDynamicDescriptor();
+	D3D12_CONSTANT_BUFFER_VIEW_DESC sceneCbvDesc = {};
+	sceneCbvDesc.BufferLocation = m_sceneDataConstantBuffer->GetGPUVirtualAddress();
+	sceneCbvDesc.SizeInBytes = (sizeof(SceneDataConstantBuffer) + 255) & ~255;
+	device->CreateConstantBufferView(&sceneCbvDesc, descriptorAllocator->GetDynamicCpuHandle(sceneDescriptorIndex));
+
+	ID3D12DescriptorHeap* descriptorHeaps[] = { descriptorAllocator->GetShaderVisibleHeap() };
+	commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	commandList->SetGraphicsRootDescriptorTable(0, descriptorAllocator->GetDynamicGpuHandle(0));
+	commandList->SetGraphicsRootDescriptorTable(1, descriptorAllocator->GetDynamicGpuHandle(sceneDescriptorIndex));
 
 	// 3. Update constant buffer with the latest transformation matrices (Model-View-Projection)
-	commandList->SetGraphicsRootConstantBufferView(1, m_sceneDataConstantBuffer->GetGPUVirtualAddress());
 	commandList->SetGraphicsRootConstantBufferView(3, m_lightingDataConstantBuffer->GetGPUVirtualAddress());
 
 	// 4. Set up scissor rect and viewport
@@ -498,9 +510,6 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
-	ID3D12DescriptorHeap* gridHeaps[] = { m_renderContext->GetCbvSrvHeap() };
-	commandList->SetDescriptorHeaps(_countof(gridHeaps), gridHeaps);
-	commandList->SetGraphicsRootDescriptorTable(0, gridHeaps[0]->GetGPUDescriptorHandleForHeapStart());
 	commandList->SetPipelineState(m_gridPipelineState.Get());
 	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
 	commandList->IASetVertexBuffers(0, 1, &m_gridVertexBufferView);

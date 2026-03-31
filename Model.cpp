@@ -4,9 +4,10 @@
 
 using namespace DirectX;
 
-Model::Model(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
+Model::Model(DescriptorAllocator* descriptorAllocator, ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
 	m_boundsMin(FLT_MAX, FLT_MAX, FLT_MAX),
 	m_boundsMax(-FLT_MAX, -FLT_MAX, -FLT_MAX),
+	m_descriptorAllocator(descriptorAllocator),
 	m_device(device),
 	m_commandList(commandList)
 {
@@ -15,14 +16,6 @@ Model::Model(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const
 
 void Model::Draw(ID3D12GraphicsCommandList* commandList)
 {
-	ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() };
-	commandList->SetDescriptorHeaps(1, heaps);
-
-	// Bind descriptor table (root param 0): toàn bộ heap
-	commandList->SetGraphicsRootDescriptorTable(
-		0,  // root parameter index — phải match Root Signature
-		m_srvHeap->GetGPUDescriptorHandleForHeapStart());
-
 	// Loop through each mesh in the model and call its Draw method
 	for (auto& mesh : m_meshes)
 	{
@@ -81,8 +74,7 @@ void Model::LoadModel(const std::string& path)
 		m_boundsRadius = XMVectorGetX(XMVector3Length(maxV - centerV));
 	}
 
-	// After all the meshes and textures are loaded, create the SRV heap and upload textures to GPU
-	CreateSRVHeap();
+	// After all the meshes and textures are loaded, upload textures to GPU and write static SRVs
 	UploadAllTexturesToGPU();
 }
 
@@ -312,19 +304,6 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 	return textures;
 }
 
-void Model::CreateSRVHeap()
-{
-	D3D12_DESCRIPTOR_HEAP_DESC desc = {};
-	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = MAX_TEXTURES;
-	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	desc.NodeMask = 0;
-
-	ThrowIfFailed(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_srvHeap)));
-	m_descriptorSize = m_device->GetDescriptorHandleIncrementSize(
-		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-}
-
 void Model::UploadAllTexturesToGPU()
 {
 	for (int meshIdx = 0; meshIdx < m_meshes.size(); meshIdx++)
@@ -376,12 +355,7 @@ UINT Model::UploadTextureToHeap(Texture& texture)
 		return it->second; // trả về slot cũ, không upload lại
 	}
 
-	if (m_nextFreeSlot >= MAX_TEXTURES)
-	{
-		throw std::runtime_error("Texture SRV heap capacity exceeded");
-	}
-
-	UINT slot = m_nextFreeSlot++;
+	UINT slot = m_descriptorAllocator->AllocateStaticDescriptor();
 
 	// Create a GPU resource for the texture
 	ComPtr<ID3D12Resource> textureResource;
@@ -425,9 +399,7 @@ UINT Model::UploadTextureToHeap(Texture& texture)
 		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 	m_commandList->ResourceBarrier(1, &barrier);
 
-	// Ghi SRV vào heap
-	D3D12_CPU_DESCRIPTOR_HANDLE handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
-	handle.ptr += slot * m_descriptorSize;
+	D3D12_CPU_DESCRIPTOR_HANDLE handle = m_descriptorAllocator->GetStaticCpuHandle(slot);
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Format = texture.image.GetMetadata().format;

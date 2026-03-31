@@ -5,7 +5,7 @@
 using std::max;
 
 Camera::Camera()
-    : m_theta(0.0f)               // facing front (along -Z toward origin)
+    : m_theta(XM_PI)              // default front view after left-handed import conversion
     , m_phi(XM_PI * 0.25f)        // slightly above horizon
     , m_radius(8.0f)
     , m_focusRadius(0.0f)

@@ -20,13 +20,13 @@ namespace
 			return false;
 		}
 
-     const DirectX::Image image = {
-			width,
-			height,
-			DXGI_FORMAT_R8G8B8A8_UNORM,
-			footprint.Footprint.RowPitch,
-			static_cast<SIZE_T>(footprint.Footprint.RowPitch) * height,
-			mappedData
+		const DirectX::Image image = {
+			   width,
+			   height,
+			   DXGI_FORMAT_R8G8B8A8_UNORM,
+			   footprint.Footprint.RowPitch,
+			   static_cast<SIZE_T>(footprint.Footprint.RowPitch) * height,
+			   mappedData
 		};
 
 		const HRESULT hr = DirectX::SaveToWICFile(
@@ -36,7 +36,7 @@ namespace
 			filePath.c_str());
 
 		readbackBuffer->Unmap(0, nullptr);
-     return SUCCEEDED(hr);
+		return SUCCEEDED(hr);
 	}
 }
 
@@ -46,6 +46,7 @@ D3D12RenderContext::D3D12RenderContext(UINT width, UINT height) :
 	m_useWarp(false),
 	m_frameIndex(0),
 	m_rtvDescriptorSize(0),
+	m_dsvDescriptorSize(0),
 	m_fenceValues{},
 	m_fenceEvent(nullptr)
 {
@@ -200,13 +201,8 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 
 		m_dsvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
 
-		D3D12_DESCRIPTOR_HEAP_DESC cbvSrvHeapDesc = {};
-		cbvSrvHeapDesc.NumDescriptors = MaxTextures;
-		cbvSrvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		cbvSrvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-		ThrowIfFailed(m_device->CreateDescriptorHeap(&cbvSrvHeapDesc, IID_PPV_ARGS(&m_cbvSrvHeap)));
-
-		m_cbvSrvDescriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		m_descriptorAllocator = std::make_unique<DescriptorAllocator>(FrameCount);
+		m_descriptorAllocator->Initialize(m_device.Get());
 	}
 
 	// Create render target views (RTVs) for each frame in the swap chain
@@ -259,11 +255,12 @@ void D3D12RenderContext::Prepare()
 	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(m_renderTargets[m_frameIndex].Get(),
 		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 	m_commandList->ResourceBarrier(1, &barrier);
+	m_descriptorAllocator->BeginFrame(m_frameIndex);
 }
 
 bool D3D12RenderContext::Present(const std::wstring& capturePath)
 {
-   const bool captureRequested = !capturePath.empty();
+	const bool captureRequested = !capturePath.empty();
 	ComPtr<ID3D12Resource> readbackBuffer;
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
 
@@ -335,7 +332,7 @@ bool D3D12RenderContext::Present(const std::wstring& capturePath)
 
 	// Signal and increment the fence value for the current frame
 	MoveToNextFrame();
-   return captureSucceeded;
+	return captureSucceeded;
 }
 
 // Prepare to render the next frame.

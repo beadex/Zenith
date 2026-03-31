@@ -214,6 +214,7 @@
     <ClInclude Include="Camera.h" />
     <ClInclude Include="D3D12Application.h" />
     <ClInclude Include="D3D12ApplicationHelper.h" />
+    <ClInclude Include="DescriptorAllocator.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="Mesh.h" />
     <ClInclude Include="Model.h" />

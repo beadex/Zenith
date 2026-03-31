@@ -34,3 +34,4 @@
 #include <tchar.h>
 #include <commdlg.h>
 #include <algorithm>
+#include <cfloat>
