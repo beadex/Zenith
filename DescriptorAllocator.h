@@ -4,9 +4,25 @@
 
 using Microsoft::WRL::ComPtr;
 
+// ---------------------------------------------------------------------------
+// Descriptor system overview
+//
+// D3D12 does not let shaders access textures / constant buffers directly.
+// Instead, the GPU reads small records called descriptors from descriptor heaps.
+//
+// This file builds the descriptor system in layers:
+//   DescriptorHeap        -> minimal wrapper over one ID3D12DescriptorHeap
+//   CbvSrvUavAllocator    -> static + per-frame dynamic CBV/SRV/UAV management
+//   RenderTargetAllocator -> typed RTV heap wrapper
+//   DepthStencilAllocator -> typed DSV heap wrapper
+//   DescriptorManager     -> groups all allocators in one owner
+// ---------------------------------------------------------------------------
+
 class DescriptorHeap
 {
 public:
+	// The base heap wrapper only knows how to create a heap and compute handles.
+	   // It does not implement allocation policy by itself.
 	DescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE heapType, D3D12_DESCRIPTOR_HEAP_FLAGS heapFlags, UINT descriptorCapacity)
 		: m_device(nullptr)
 		, m_heapType(heapType)
@@ -18,6 +34,8 @@ public:
 
 	void Initialize(ID3D12Device* device)
 	{
+		// Different heap types (RTV, DSV, CBV/SRV/UAV) use different descriptor
+		  // sizes, so the increment size must be queried from the device.
 		m_device = device;
 		m_descriptorSize = m_device->GetDescriptorHandleIncrementSize(m_heapType);
 
@@ -35,6 +53,8 @@ public:
 
 	D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(UINT index) const
 	{
+		// CPU descriptor handles are just pointer-like values plus an index-based
+		  // offset. The descriptor size tells us how far to move for each slot.
 		D3D12_CPU_DESCRIPTOR_HANDLE handle = m_heap->GetCPUDescriptorHandleForHeapStart();
 		handle.ptr += static_cast<SIZE_T>(index) * m_descriptorSize;
 		return handle;
@@ -42,6 +62,8 @@ public:
 
 	D3D12_GPU_DESCRIPTOR_HANDLE GetGpuHandle(UINT index) const
 	{
+		// Only shader-visible heaps expose GPU handles. RTV and DSV heaps are not
+		   // read by shaders, so asking them for GPU handles is an error.
 		if (!IsShaderVisible())
 		{
 			throw std::runtime_error("Descriptor heap is not shader visible");
@@ -66,6 +88,10 @@ protected:
 class CbvSrvUavAllocator
 {
 public:
+	// The CBV/SRV/UAV path is more advanced than RTV/DSV because shaders need a
+	  // shader-visible heap every frame. This allocator therefore uses two layers:
+	  //   1. a static non-shader-visible heap for long-lived descriptors
+	  //   2. a per-frame shader-visible heap used during rendering
 	static constexpr UINT MaxStaticDescriptors = 1024;
 	static constexpr UINT MaxDynamicDescriptorsPerFrame = 64;
 	static constexpr UINT MaxShaderVisibleDescriptors = MaxStaticDescriptors + MaxDynamicDescriptorsPerFrame;
@@ -91,6 +117,8 @@ public:
 
 	void Initialize(ID3D12Device* device)
 	{
+		// Static descriptors are written once and copied later.
+		  // Dynamic heaps are the per-frame heaps that are actually bound to shaders.
 		m_device = device;
 		m_staticHeap.Initialize(device);
 		for (auto& dynamicHeap : m_dynamicHeaps)
@@ -101,6 +129,8 @@ public:
 
 	void ResetStaticDescriptors()
 	{
+		// Full reset for the long-lived allocation state. This is rarely needed in
+		// the current sample, but useful if the whole descriptor pool is rebuilt.
 		m_staticDescriptorCount = 0;
 		std::fill(m_staticDescriptorAllocated.begin(), m_staticDescriptorAllocated.end(), false);
 		m_freeStaticDescriptors.clear();
@@ -112,6 +142,9 @@ public:
 
 	void BeginFrame(UINT frameIndex)
 	{
+		// At frame begin, all currently-live static descriptors are copied into the
+		 // current shader-visible heap. After that, dynamic per-frame descriptors are
+		 // allocated after the copied static range.
 		m_currentFrameIndex = frameIndex;
 		m_dynamicDescriptorCounts[m_currentFrameIndex] = m_staticDescriptorCount;
 		if (m_staticDescriptorCount == 0)
@@ -128,6 +161,8 @@ public:
 
 	UINT AllocateStaticDescriptor()
 	{
+		// Reuse a freed slot if possible. This prevents descriptor exhaustion when
+		 // models are loaded and destroyed repeatedly.
 		if (!m_freeStaticDescriptors.empty())
 		{
 			const UINT slot = m_freeStaticDescriptors.back();
@@ -149,6 +184,9 @@ public:
 
 	void ReleaseStaticDescriptor(UINT index)
 	{
+		// Released slots go onto a free list. If the released slot happens to be at
+		// the logical end of the active range, the active count is trimmed so future
+		// BeginFrame() copies do not include dead tail descriptors.
 		if (index >= m_staticDescriptorCount || !m_staticDescriptorAllocated[index])
 		{
 			return;
@@ -172,6 +210,8 @@ public:
 
 	UINT AllocateDynamicDescriptor()
 	{
+		// Dynamic descriptors are short-lived and only valid for the current frame.
+		  // They are typically used for temporary CBVs like SceneData or LightingData.
 		UINT& dynamicDescriptorCount = m_dynamicDescriptorCounts[m_currentFrameIndex];
 		if (dynamicDescriptorCount >= MaxShaderVisibleDescriptors)
 		{
@@ -203,6 +243,7 @@ private:
 class RenderTargetAllocator : public DescriptorHeap
 {
 public:
+	// Thin type wrapper for RTV heaps. No shader-visible behavior is needed.
 	explicit RenderTargetAllocator(UINT descriptorCapacity)
 		: DescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, descriptorCapacity)
 	{
@@ -212,6 +253,7 @@ public:
 class DepthStencilAllocator : public DescriptorHeap
 {
 public:
+	// Thin type wrapper for DSV heaps.
 	explicit DepthStencilAllocator(UINT descriptorCapacity)
 		: DescriptorHeap(D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, descriptorCapacity)
 	{
@@ -221,6 +263,8 @@ public:
 class DescriptorManager
 {
 public:
+	// Convenience owner that keeps all descriptor allocators together so the
+	   // render context does not need to manage them as separate members.
 	explicit DescriptorManager(UINT frameCount)
 		: m_cbvSrvUavAllocator(frameCount)
 		, m_rtvAllocator(frameCount)

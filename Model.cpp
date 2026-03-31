@@ -4,6 +4,17 @@
 
 using namespace DirectX;
 
+// ---------------------------------------------------------------------------
+// Model
+//
+// A Model is a higher-level asset built from one or more Mesh objects.
+// Its job is to:
+//   - load geometry and materials through Assimp
+//   - compute bounds for camera framing
+//   - load and upload textures
+//   - assign texture descriptor indices into each mesh's MaterialData
+// ---------------------------------------------------------------------------
+
 Model::Model(CbvSrvUavAllocator* descriptorAllocator, ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path) :
 	m_boundsMin(FLT_MAX, FLT_MAX, FLT_MAX),
 	m_boundsMax(-FLT_MAX, -FLT_MAX, -FLT_MAX),
@@ -16,6 +27,8 @@ Model::Model(CbvSrvUavAllocator* descriptorAllocator, ID3D12Device* device, ID3D
 
 Model::~Model()
 {
+	// Texture SRV descriptors live in the allocator's static heap. When the model
+	   // goes away, those slots can be returned to the free list and reused.
 	if (!m_descriptorAllocator)
 	{
 		return;
@@ -46,6 +59,8 @@ void Model::Draw(ID3D12GraphicsCommandList* commandList)
 
 void Model::LoadModel(const std::string& path)
 {
+	// Assimp converts the file into a scene graph. The code then walks that scene
+	  // and converts each aiMesh into the sample's own Mesh class.
 	Assimp::Importer importer;
 
 	unsigned int importFlags =
@@ -71,7 +86,7 @@ void Model::LoadModel(const std::string& path)
 	const size_t lastSeparator = path.find_last_of("\\/");
 	m_directory = (lastSeparator == std::string::npos) ? std::string() : path.substr(0, lastSeparator);
 
-	// Process the root node recursively
+	// Process the root node recursively and collect meshes / textures / bounds.
 	ProcessNode(scene->mRootNode, scene);
 
 	if (!m_meshes.empty())
@@ -87,12 +102,14 @@ void Model::LoadModel(const std::string& path)
 		m_boundsRadius = XMVectorGetX(XMVector3Length(maxV - centerV));
 	}
 
-	// After all the meshes and textures are loaded, upload textures to GPU and write static SRVs
+	// After all meshes are known, upload textures and assign descriptor indices.
 	UploadAllTexturesToGPU();
 }
 
 void Model::ProcessNode(aiNode* node, const aiScene* scene)
 {
+	// Assimp stores a hierarchy of nodes. Each node can reference meshes and can
+	// also have children, so the scene is traversed recursively.
 	OutputDebugStringA(("ProcessNode: " + std::string(node->mName.C_Str()) +
 		" meshes=" + std::to_string(node->mNumMeshes) +
 		" children=" + std::to_string(node->mNumChildren) + "\n").c_str());
@@ -112,6 +129,8 @@ void Model::ProcessNode(aiNode* node, const aiScene* scene)
 
 Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 {
+	// This function converts Assimp's aiMesh into CPU-side arrays that the Mesh
+	 // constructor will then upload to GPU buffers.
 	std::vector<Vertex> vertices;
 	std::vector<UINT> indices;
 	std::vector<Texture> textures;
@@ -175,7 +194,8 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		}
 	}
 
-	// Process material textures
+	// Gather diffuse/specular textures referenced by the material so they can be
+	// uploaded later and represented by descriptor indices in MaterialData.
 	if (mesh->mMaterialIndex >= 0)
 	{
 		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
@@ -198,6 +218,9 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType type, const std::string& typeName, const aiScene* scene)
 {
 	std::vector<Texture> textures;
+
+	// The cache prevents loading and uploading the same texture file multiple
+	// times when several meshes or materials reference it.
 
 	for (unsigned int i = 0; i < mat->GetTextureCount(type); i++)
 	{
@@ -319,6 +342,9 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 
 void Model::UploadAllTexturesToGPU()
 {
+	// Each mesh receives a compact MaterialData struct containing descriptor-slot
+	   // indices instead of direct texture objects. The shader later uses those
+	   // indices to fetch from the descriptor heap.
 	for (int meshIdx = 0; meshIdx < m_meshes.size(); meshIdx++)
 	{
 		auto& mesh = m_meshes[meshIdx];
@@ -358,6 +384,8 @@ void Model::UploadAllTexturesToGPU()
 
 UINT Model::UploadTextureToHeap(Texture& texture)
 {
+	// If the texture was already uploaded, simply reuse the existing descriptor
+	// slot and avoid duplicate GPU resources.
 	OutputDebugStringA(("  [Upload] path='" + texture.path +
 		"' cached=" + std::to_string(m_textureCache.count(texture.path)) + "\n").c_str());
 	auto it = m_textureCache.find(texture.path);
@@ -370,14 +398,14 @@ UINT Model::UploadTextureToHeap(Texture& texture)
 
 	UINT slot = m_descriptorAllocator->AllocateStaticDescriptor();
 
-	// Create a GPU resource for the texture
+	// Create the final GPU texture resource in default memory.
 	ComPtr<ID3D12Resource> textureResource;
 	ThrowIfFailed(DirectX::CreateTexture(
 		m_device,
 		texture.image.GetMetadata(),
 		&textureResource));
 
-	// Upload texture data to the GPU using an intermediate upload buffer
+	// Prepare subresource upload data, then stage it through an UPLOAD heap.
 	std::vector<D3D12_SUBRESOURCE_DATA> subresources;
 	ThrowIfFailed(DirectX::PrepareUpload(
 		m_device,
@@ -405,7 +433,7 @@ UINT Model::UploadTextureToHeap(Texture& texture)
 		uploadBuffer.Get(), 0, 0,
 		(UINT)subresources.size(), subresources.data());
 
-	// Barrier: COPY_DEST → PIXEL_SHADER_RESOURCE
+	// After the copy is recorded, transition so shaders can sample from it.
 	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 		textureResource.Get(),
 		D3D12_RESOURCE_STATE_COPY_DEST,

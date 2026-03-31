@@ -2,6 +2,19 @@
 #include "Mesh.h"
 #include "D3D12ApplicationHelper.h"
 
+// ---------------------------------------------------------------------------
+// Mesh
+//
+// A Mesh owns the GPU resources needed to draw one batch of geometry:
+//   - vertex buffer
+//   - index buffer
+//   - per-mesh material constant buffer
+//
+// The important D3D12 lesson here is the split between:
+//   - DEFAULT heaps  -> fast GPU memory for final resources
+//   - UPLOAD heaps   -> CPU-visible staging memory used to initialize them
+// ---------------------------------------------------------------------------
+
 Mesh::Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures) :
 	m_vertices(vertices),
 	m_indices(indices),
@@ -15,6 +28,8 @@ Mesh::Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::ve
 
 void Mesh::Draw(ID3D12GraphicsCommandList* commandList)
 {
+	// Mesh::Draw only binds geometry. Root parameters and descriptor tables are
+	 // set by higher layers (Model / RenderEngine) before this draw call happens.
 	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 	commandList->IASetIndexBuffer(&m_indexBufferView);
@@ -37,7 +52,8 @@ void Mesh::CreateVertexAndIndexBuffers(ID3D12Device* device, ID3D12GraphicsComma
 	const UINT vertexBufferSize = m_vertexCount * sizeof(Vertex);
 	const UINT indexBufferSize = m_indexCount * sizeof(UINT);
 
-	// 1. Create GPU-only DEFAULT heap buffers
+	// 1. Create GPU-only DEFAULT heap buffers.
+	  // These are the final runtime resources used by the input assembler.
 	ThrowIfFailed(device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
 		D3D12_HEAP_FLAG_NONE,
@@ -54,7 +70,9 @@ void Mesh::CreateVertexAndIndexBuffers(ID3D12Device* device, ID3D12GraphicsComma
 		nullptr,
 		IID_PPV_ARGS(&m_indexBuffer)));
 
-	// 2. Create CPU-visible UPLOAD staging buffers (members, NOT locals)
+	// 2. Create CPU-visible UPLOAD staging buffers.
+	 // Data is copied into these first because the CPU cannot directly write into
+	 // a DEFAULT heap resource.
 	ThrowIfFailed(device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,
@@ -83,11 +101,12 @@ void Mesh::CreateVertexAndIndexBuffers(ID3D12Device* device, ID3D12GraphicsComma
 	memcpy(pMapped, m_indices.data(), indexBufferSize);
 	m_indexUploadBuffer->Unmap(0, nullptr);
 
-	// 4. Record GPU copy: upload heap -> default heap
+	// 4. Record the GPU-side copy from upload heap into final default heap.
 	commandList->CopyBufferRegion(m_vertexBuffer.Get(), 0, m_vertexUploadBuffer.Get(), 0, vertexBufferSize);
 	commandList->CopyBufferRegion(m_indexBuffer.Get(), 0, m_indexUploadBuffer.Get(), 0, indexBufferSize);
 
-	// 5. Transition to shader-readable states
+	// 5. Transition to the states required for drawing.
+	  // Even though these are buffers, D3D12 still requires explicit state changes.
 	const D3D12_RESOURCE_BARRIER barriers[] = {
 		CD3DX12_RESOURCE_BARRIER::Transition(m_vertexBuffer.Get(),
 			D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER),
@@ -111,8 +130,8 @@ void Mesh::CreateMaterialConstantBuffer(ID3D12Device* device)
 	// Constant buffer size phải align lên 256 bytes — hardware requirement
 	const UINT cbSize = (sizeof(MaterialData) + 255) & ~255;
 
-	// Dùng UPLOAD heap: MaterialData nhỏ (16 bytes), không cần staging buffer riêng
-	// Có thể update bất kỳ lúc nào qua SetMaterialData()
+	// MaterialData is tiny, so keeping it in an UPLOAD heap is a good trade-off:
+	// simpler code, easy CPU updates, no separate upload staging path needed.
 	ThrowIfFailed(device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,
