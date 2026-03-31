@@ -55,6 +55,7 @@ public:
 	CbvSrvUavAllocator* GetCbvSrvUavAllocator() const { return m_descriptorManager->GetCbvSrvUavAllocator(); }
 	RenderTargetAllocator* GetRtvAllocator() const { return m_descriptorManager->GetRtvAllocator(); }
 	DepthStencilAllocator* GetDsvAllocator() const { return m_descriptorManager->GetDsvAllocator(); }
+	UINT Get4xMsaaQuality() const { return m_4xMsaaQuality; }
 
 private:
 	ComPtr<IDXGIFactory4> m_factory;
@@ -79,6 +80,8 @@ private:
 	ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];
 	ComPtr<ID3D12GraphicsCommandList> m_commandList;
 	std::unique_ptr<DescriptorManager> m_descriptorManager;
+	UINT m_4xMsaaQuality = 0;
+	DXGI_FORMAT m_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
 	// Synchronization objects
 	UINT m_frameIndex;

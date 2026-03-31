@@ -28,6 +28,7 @@ namespace
 		const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint,
 		UINT width,
 		UINT height,
+		DXGI_FORMAT backBufferFormat,
 		const std::wstring& filePath)
 	{
 		BYTE* mappedData = nullptr;
@@ -40,7 +41,7 @@ namespace
 		const DirectX::Image image = {
 			   width,
 			   height,
-			   DXGI_FORMAT_R8G8B8A8_UNORM,
+			   DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
 			   footprint.Footprint.RowPitch,
 			   static_cast<SIZE_T>(footprint.Footprint.RowPitch) * height,
 			   mappedData
@@ -48,7 +49,7 @@ namespace
 
 		const HRESULT hr = DirectX::SaveToWICFile(
 			image,
-			DirectX::WIC_FLAGS_NONE,
+			DirectX::WIC_FLAGS_FORCE_SRGB,
 			GetWICCodec(WIC_CODEC_PNG),
 			filePath.c_str());
 
@@ -155,11 +156,24 @@ void D3D12RenderContext::CreateDevice(bool useWarp)
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
 	ThrowIfFailed(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
+
+	D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS msQualityLevels;
+	msQualityLevels.Format = m_backBufferFormat;
+	msQualityLevels.SampleCount = 4;
+	msQualityLevels.Flags = D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE;
+	msQualityLevels.NumQualityLevels = 0;
+	ThrowIfFailed(m_device->CheckFeatureSupport(
+		D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,
+		&msQualityLevels,
+		sizeof(msQualityLevels)));
+
+	m_4xMsaaQuality = msQualityLevels.NumQualityLevels;
+	assert(m_4xMsaaQuality > 0 && "Unexpected MSAA quality level.");
 }
 
 void D3D12RenderContext::CreateResources(HWND hwnd)
 {
-	const DXGI_SAMPLE_DESC sampleDesc = { 1, 0 };
+	const DXGI_SAMPLE_DESC sampleDesc = { m_4xMsaaQuality, m_4xMsaaQuality - 1 };
 	// The swap chain owns the back buffers that are presented to the window.
 	// Double buffering is used here via FrameCount = 2.
 	{
@@ -167,7 +181,7 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 		swapChainDesc.BufferCount = FrameCount;
 		swapChainDesc.Width = m_width;
 		swapChainDesc.Height = m_height;
-		swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		swapChainDesc.Format = m_backBufferFormat;
 		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 		swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 		swapChainDesc.SampleDesc = sampleDesc;
@@ -357,6 +371,7 @@ bool D3D12RenderContext::Present(const std::wstring& capturePath)
 			footprint,
 			m_width,
 			m_height,
+			m_backBufferFormat,
 			capturePath);
 	}
 
