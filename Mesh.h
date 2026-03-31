@@ -18,7 +18,12 @@ struct MaterialData
 	UINT numDiffuse = 0;
 	UINT numSpecular = 0;
 	UINT numOpacity = 0;
+	UINT padding0 = 0;
+	UINT padding1 = 0;
+	XMFLOAT4 baseColorFactor = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
 };
+
+static_assert(offsetof(MaterialData, baseColorFactor) == 32, "MaterialData must match HLSL packing.");
 
 struct Texture {
 	std::string type; // For example: "texture_diffuse", "texture_specular"
@@ -42,6 +47,7 @@ public:
 
 	std::vector<Texture>& GetTextures() { return m_textures; }
 	bool IsTransparent() const { return m_isTransparent; }
+	const MaterialData& GetMaterialData() const { return m_materialData; }
 	float GetCameraDistanceSquared(const XMFLOAT3& cameraPosition, const XMFLOAT3& modelOffset) const;
 
 	D3D12_GPU_VIRTUAL_ADDRESS GetMaterialConstantBufferAddress() const

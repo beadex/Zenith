@@ -6,9 +6,38 @@ using namespace DirectX;
 
 namespace
 {
-	bool TextureHasAlpha(const ScratchImage& image)
+ bool TextureUsesTransparency(const ScratchImage& image)
 	{
-		return DirectX::HasAlpha(image.GetMetadata().format);
+       const TexMetadata& metadata = image.GetMetadata();
+		if (!DirectX::HasAlpha(metadata.format))
+		{
+			return false;
+		}
+
+		bool hasTransparentPixel = false;
+		const HRESULT hr = DirectX::EvaluateImage(
+			image.GetImages(),
+			image.GetImageCount(),
+			metadata,
+			[&hasTransparentPixel](const XMVECTOR* pixels, size_t width, size_t y)
+			{
+				UNREFERENCED_PARAMETER(y);
+				if (hasTransparentPixel)
+				{
+					return;
+				}
+
+				for (size_t x = 0; x < width; ++x)
+				{
+					if (XMVectorGetW(pixels[x]) < 0.999f)
+					{
+						hasTransparentPixel = true;
+						return;
+					}
+				}
+			});
+
+		return SUCCEEDED(hr) && hasTransparentPixel;
 	}
 
 	void DrawMesh(ID3D12GraphicsCommandList* commandList, Mesh& mesh)
@@ -232,17 +261,49 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 	if (mesh->mMaterialIndex >= 0)
 	{
 		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
-		bool isTransparent = material->GetTextureCount(aiTextureType_OPACITY) > 0;
+		MaterialData materialData = {};
+		aiColor4D baseColor(1.0f, 1.0f, 1.0f, 1.0f);
+		if (material->Get(AI_MATKEY_BASE_COLOR, baseColor) != aiReturn_SUCCESS)
+		{
+			material->Get(AI_MATKEY_COLOR_DIFFUSE, baseColor);
+		}
+		materialData.baseColorFactor = XMFLOAT4(baseColor.r, baseColor.g, baseColor.b, baseColor.a);
+
+		const aiTextureType diffuseTextureType =
+			material->GetTextureCount(aiTextureType_BASE_COLOR) > 0 ? aiTextureType_BASE_COLOR : aiTextureType_DIFFUSE;
+
+		aiString alphaMode;
+		const bool hasExplicitAlphaMode = material->Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == aiReturn_SUCCESS;
+		const bool isBlendAlphaMode = hasExplicitAlphaMode && _stricmp(alphaMode.C_Str(), "BLEND") == 0;
+		const bool isMaskAlphaMode = hasExplicitAlphaMode && _stricmp(alphaMode.C_Str(), "MASK") == 0;
+		const bool isOpaqueAlphaMode = hasExplicitAlphaMode && _stricmp(alphaMode.C_Str(), "OPAQUE") == 0;
+
+		bool isTransparent = false;
+		if (isBlendAlphaMode)
+		{
+			isTransparent = true;
+		}
+		else if (!hasExplicitAlphaMode)
+		{
+			isTransparent = material->GetTextureCount(aiTextureType_OPACITY) > 0;
+			isTransparent = isTransparent || materialData.baseColorFactor.w < 0.999f;
+		}
+
+		UNREFERENCED_PARAMETER(isMaskAlphaMode);
+		UNREFERENCED_PARAMETER(isOpaqueAlphaMode);
 		textures.reserve(
-			material->GetTextureCount(aiTextureType_DIFFUSE) +
+			material->GetTextureCount(diffuseTextureType) +
 			material->GetTextureCount(aiTextureType_SPECULAR) +
 			material->GetTextureCount(aiTextureType_OPACITY));
 
-		// Load diffuse textures
-		std::vector<Texture> diffuseMaps = LoadMaterialTextures(material, aiTextureType_DIFFUSE, "texture_diffuse", scene);
+		// Load diffuse/base-color textures.
+		std::vector<Texture> diffuseMaps = LoadMaterialTextures(material, diffuseTextureType, "texture_diffuse", scene);
 		for (auto& tex : diffuseMaps)
 		{
-			isTransparent = isTransparent || tex.hasAlpha;
+          if (!hasExplicitAlphaMode)
+			{
+				isTransparent = isTransparent || tex.hasAlpha;
+			}
 			textures.push_back(std::move(tex));
 		}
 
@@ -254,14 +315,21 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		std::vector<Texture> opacityMaps = LoadMaterialTextures(material, aiTextureType_OPACITY, "texture_opacity", scene);
 		for (auto& tex : opacityMaps)
 		{
-			isTransparent = true;
+           if (!hasExplicitAlphaMode)
+			{
+				isTransparent = true;
+			}
 			textures.push_back(std::move(tex));
 		}
 
-		return Mesh(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), isTransparent);
+		Mesh result(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), isTransparent);
+		result.SetMaterialData(materialData);
+		return result;
 	}
 
-	return Mesh(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), false);
+	Mesh result(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), false);
+	result.SetMaterialData(MaterialData{});
+	return result;
 }
 
 std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType type, const std::string& typeName, const aiScene* scene)
@@ -385,7 +453,7 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 			}
 		}
 
-		texture.hasAlpha = (type == aiTextureType_OPACITY) || TextureHasAlpha(texture.image);
+       texture.hasAlpha = (type == aiTextureType_OPACITY) || TextureUsesTransparency(texture.image);
 		m_textureTransparencyCache[texture.path] = texture.hasAlpha;
 
 		textures.push_back(std::move(texture));
@@ -402,7 +470,7 @@ void Model::UploadAllTexturesToGPU()
 	for (int meshIdx = 0; meshIdx < m_meshes.size(); meshIdx++)
 	{
 		auto& mesh = m_meshes[meshIdx];
-		MaterialData matData = {};
+		MaterialData matData = mesh.GetMaterialData();
 		bool diffuseSet = false;
 		bool specularSet = false;
 		bool opacitySet = false;

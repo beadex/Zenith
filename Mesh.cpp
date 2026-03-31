@@ -64,7 +64,8 @@ void Mesh::SetMaterialData(const MaterialData& data)
 		" specularStart=" + std::to_string(data.specularStartIndex) +
 		" numSpecular=" + std::to_string(data.numSpecular) +
 		" opacityStart=" + std::to_string(data.opacityStartIndex) +
-		" numOpacity=" + std::to_string(data.numOpacity) + "\n").c_str());
+      " numOpacity=" + std::to_string(data.numOpacity) +
+		" baseAlpha=" + std::to_string(data.baseColorFactor.w) + "\n").c_str());
 	m_materialData = data;
 	// m_mappedMaterialData luôn valid vì giữ mapped suốt lifetime
 	memcpy(m_mappedMaterialData, &data, sizeof(MaterialData));

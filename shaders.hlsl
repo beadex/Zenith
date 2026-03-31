@@ -19,6 +19,9 @@ struct MaterialData
     uint numDiffuse;
     uint numSpecular;
     uint numOpacity;
+    uint padding0;
+    uint padding1;
+    float4 baseColorFactor;
 };
 ConstantBuffer<MaterialData> materialData : register(b1);
 
@@ -123,10 +126,10 @@ float4 SampleDiffuse(float2 uv)
 {
     if (materialData.numDiffuse > 0)
     {
-        return gTextures[materialData.diffuseStartIndex].Sample(g_sampler, uv);
+        return gTextures[materialData.diffuseStartIndex].Sample(g_sampler, uv) * materialData.baseColorFactor;
     }
 
-    return float4(1.0f, 1.0f, 1.0f, 1.0f);
+    return materialData.baseColorFactor;
 }
 
 float SampleOpacity(float2 uv)
