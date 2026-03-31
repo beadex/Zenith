@@ -20,6 +20,19 @@
 // A useful mental model is:
 //   - D3D12RenderContext = platform / GPU plumbing
 //   - ZenithRenderEngine = actual scene rendering policy
+//
+// Shadow features added so far in this file:
+//   1. create depth-only PSOs for rendering from the light
+//   2. build a light view/projection every frame
+//   3. fit the orthographic shadow frustum to the model bounds
+//   4. render a shadow pass before the main pass
+//   5. provide an optional solid ground plane to inspect shadow quality
+//
+// So when reading this file from top to bottom, the beginner flow is:
+//   - setup GPU states and buffers in `OnInit()`
+//   - compute camera + light transforms in `OnUpdate()`
+//   - render shadow map first in `OnRender()`
+//   - render the normal shaded scene second in `OnRender()`
 // ---------------------------------------------------------------------------
 
 namespace
@@ -77,9 +90,15 @@ void ZenithRenderEngine::OnInit()
 	m_renderContext->Initialize(Win32Application::GetHwnd(), m_useWarpDevice);
 
 	// 2. Create all long-lived rendering objects.
-	   //
-	   // These are the "engine state" objects that usually live for most of the
-	   // program: root signature, PSOs, persistent upload buffers, and the grid.
+		 //
+		 // These are the "engine state" objects that usually live for most of the
+		// program: root signature, PSOs, persistent upload buffers, and the grid.
+		 //
+		 // For the shadow work added so far, this stage creates:
+		 //   - main scene PSOs
+		 //   - shadow-only PSOs
+		 //   - constant buffers for the camera pass, light pass, and inspection plane
+		 //   - helper geometry like the line grid and optional solid ground plane
 	CreateRootSignature();
 	// The renderer now creates four model PSOs so meshes can be dispatched by the
 	  // combination of transparency and double-sided state.
@@ -320,7 +339,7 @@ void ZenithRenderEngine::CreateShadowPipelineState()
 {
 	auto device = m_renderContext->GetDevice();
 	UINT8* pVertexShaderData = nullptr;
-    UINT8* pPixelShaderData = nullptr;
+	UINT8* pPixelShaderData = nullptr;
 	UINT vertexShaderDataLength = 0;
 	UINT pixelShaderDataLength = 0;
 
@@ -337,7 +356,7 @@ void ZenithRenderEngine::CreateShadowPipelineState()
 	psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
 	psoDesc.pRootSignature = m_rootSignature.Get();
 	psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
-   psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
+	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
 	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	psoDesc.RasterizerState.DepthBias = ShadowRasterDepthBias;
 	psoDesc.RasterizerState.SlopeScaledDepthBias = ShadowRasterSlopeScaledDepthBias;
@@ -360,14 +379,14 @@ void ZenithRenderEngine::CreateShadowPipelineState()
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_shadowPipelineState)));
 
 	free(pVertexShaderData);
-   free(pPixelShaderData);
+	free(pPixelShaderData);
 }
 
 void ZenithRenderEngine::CreateDoubleSidedShadowPipelineState()
 {
 	auto device = m_renderContext->GetDevice();
 	UINT8* pVertexShaderData = nullptr;
-    UINT8* pPixelShaderData = nullptr;
+	UINT8* pPixelShaderData = nullptr;
 	UINT vertexShaderDataLength = 0;
 	UINT pixelShaderDataLength = 0;
 
@@ -384,7 +403,7 @@ void ZenithRenderEngine::CreateDoubleSidedShadowPipelineState()
 	psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
 	psoDesc.pRootSignature = m_rootSignature.Get();
 	psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
-   psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
+	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
 	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	// Same idea as the main shadow PSO, but culling is disabled for double-sided meshes.
 	psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
@@ -406,7 +425,7 @@ void ZenithRenderEngine::CreateDoubleSidedShadowPipelineState()
 	ThrowIfFailed(device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_doubleSidedShadowPipelineState)));
 
 	free(pVertexShaderData);
-   free(pPixelShaderData);
+	free(pPixelShaderData);
 }
 
 void ZenithRenderEngine::CreateTransparentPipelineState()
@@ -855,10 +874,16 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 	m_camera.Update();
 
 	// Build the matrices that shaders need this frame.
-	  //
-	  // In this sample the world matrix is only a translation used to recenter the
-	  // imported model, but this is exactly where rotation / scale / animation would
-	  // be composed in a larger renderer.
+		 //
+		 // In this sample the world matrix is only a translation used to recenter the
+		 // imported model, but this is exactly where rotation / scale / animation would
+	   // be composed in a larger renderer.
+		 //
+		 // This function is also where all shadow-camera work is prepared:
+		 //   - choose a light direction
+		 //   - position a light camera
+		 //   - fit an orthographic projection to the model bounds
+		 //   - upload the final lightViewProjection matrix for the main shader
 	const XMMATRIX translate = XMMatrixTranslation(
 		m_modelOffset.x,
 		m_modelOffset.y,
@@ -908,7 +933,17 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 	const XMMATRIX lightView = XMMatrixLookAtLH(lightPosition, shadowTargetVector, lightUp);
 
 	// Fit the orthographic shadow camera to the model's transformed bounds in light space.
-	// This uses the shadow-map texels more efficiently than a loose radius-based box.
+	   // This uses the shadow-map texels more efficiently than a loose radius-based box.
+	   //
+	   // Why do this?
+	   //   - a loose box wastes shadow resolution on empty space
+	   //   - a tighter box gives sharper shadows from the same texture size
+	   //
+	   // The idea is simple:
+	   //   1. build the 8 corners of the model's world-space bounding box
+	   //   2. transform those corners into light space
+	   //   3. compute min/max extents there
+	   //   4. build an off-center orthographic projection that tightly encloses them
 	const XMFLOAT3 shadowCorners[] = {
 		XMFLOAT3(shadowBoundsMin.x, shadowBoundsMin.y, shadowBoundsMin.z),
 		XMFLOAT3(shadowBoundsMin.x, shadowBoundsMin.y, shadowBoundsMax.z),
@@ -1008,6 +1043,12 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	m_pendingRenderImagePath.clear();
 
 	// 1. Prepare the command list for rendering (Reset command allocator, command list, set render target, etc.)
+	 //
+	 // Important rendering order for the whole shadow system:
+	 //   1. prepare command list and per-frame descriptors
+	 //   2. render shadow map from the light's point of view
+	 //   3. render the main scene from the camera's point of view
+	 //   4. present the back buffer
 	m_renderContext->Prepare();
 
 	auto commandList = m_renderContext->GetCommandList();
@@ -1051,10 +1092,13 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	commandList->SetGraphicsRootDescriptorTable(0, cbvSrvUavAllocator->GetDynamicGpuHandle(0));
 
 	// 3. At this point all root bindings needed by the shaders are in place:
-	//   slot 0 -> texture SRV table
-	//   slot 1 -> scene CBV table
-	//   slot 2 -> material root CBV (set later per mesh)
-	//   slot 3 -> lighting CBV table
+	 //   slot 0 -> texture SRV table
+	 //   slot 1 -> scene CBV table
+	 //   slot 2 -> material root CBV (set later per mesh)
+	 //   slot 3 -> lighting CBV table
+	 //
+	 // The shadow pass reuses the same root signature layout. The only difference is
+	 // that slot 1 points at the light-camera SceneData instead of the normal camera.
 	if (m_model)
 	{
 		// --- Shadow pass ---
@@ -1074,8 +1118,11 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 		commandList->ClearDepthStencilView(shadowDsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 		commandList->OMSetRenderTargets(0, nullptr, FALSE, &shadowDsvHandle);
 
-		// 3. Render opaque geometry from the light's point of view.
-		   //    The result is depth only, stored in the shadow map.
+		// 3. Render geometry from the light's point of view.
+		//
+		// The shadow PSO is depth-focused, so no color is written here.
+		// Instead, the GPU stores the nearest surface depth into the shadow map.
+		// Later, the main shader compares its current pixel depth against that value.
 		commandList->SetPipelineState(m_shadowPipelineState.Get());
 		m_model->DrawOpaque(commandList, false);
 		commandList->SetPipelineState(m_doubleSidedShadowPipelineState.Get());
@@ -1133,6 +1180,7 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	}
 
 	// Opaque meshes render first so they fill depth normally.
+	  // At this point the shadow map is already ready for sampling in the pixel shader.
 	commandList->SetPipelineState(m_pipelineState.Get());
 
 	// 6. Draw the model

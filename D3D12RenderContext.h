@@ -5,6 +5,23 @@
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
 
+// ---------------------------------------------------------------------------
+// D3D12RenderContext
+//
+// This class now owns both kinds of depth targets used by the sample:
+//   1. the normal camera depth buffer for the main scene pass
+//   2. the shadow-map depth buffer for the light pass
+//
+// A beginner-friendly way to think about the shadow map is:
+//   - first render depth from the light's point of view
+//   - then sample that depth like a texture during normal shading
+//   - if the current pixel is farther than the stored light-depth, it is shadowed
+//
+// The higher-level renderer (`ZenithRenderEngine`) uses the accessors below to:
+//   - bind the shadow DSV during the shadow pass
+//   - bind the shadow SRV during the main pass
+//   - use a dedicated viewport/scissor sized to the shadow texture
+// ---------------------------------------------------------------------------
 class D3D12RenderContext
 {
 public:

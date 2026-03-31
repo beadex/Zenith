@@ -1,4 +1,27 @@
 // ============================================================
+// Shader overview for the current beginner shadow implementation
+// ============================================================
+//
+// This file now contains three related rendering paths:
+//   1. normal camera rendering (`VSMain` + `PSMain`)
+//   2. grid rendering (`GridVSMain` + `GridPSMain`)
+//   3. shadow-map rendering (`ShadowVSMain` + `ShadowPSMain`)
+//
+// The core shadow workflow is:
+//   - `ShadowVSMain` / `ShadowPSMain` write depth from the light's view
+//   - `PSMain` transforms each visible pixel into light space
+//   - `ComputeShadowVisibility()` samples the shadow map with small PCF filtering
+//   - ambient stays visible, while diffuse/specular are reduced by shadowing
+//
+// Features implemented so far in the shader:
+//   - one directional light
+//   - one shadow map
+//   - 3x3 PCF soft shadow edges
+//   - alpha-mask shadow casting for cutout materials
+//   - separate diffuse/specular shadow response so highlights fade faster
+// ============================================================
+
+// ============================================================
 // Constant Buffers
 // ============================================================
 
@@ -140,6 +163,10 @@ float4 PSMain(PSInput input) : SV_TARGET
     float3 norm = normalize(input.normal);
     float3 viewDir = normalize(lightingData.viewPos.xyz - input.worldPos);
     float4 diffuseSample = SampleDiffuse(input.uv);
+
+    // Ambient is intentionally kept separate from shadowing.
+    // This means surfaces in shadow are not completely black; they still receive
+    // a small amount of base/environment-style light.
     float3 ambient = lightingData.directionalLight.ambient.rgb * diffuseSample.rgb;
     float opacity = diffuseSample.a * SampleOpacity(input.uv);
 
@@ -201,6 +228,12 @@ float SampleOpacity(float2 uv)
 DirectLightResult CalcDirLight(DirectionalLightData light, float3 normal, float3 viewDir, float2 uv)
 {
     DirectLightResult result;
+
+    // This helper intentionally computes only DIRECT lighting terms.
+    // Ambient is handled separately in `PSMain()` so shadowing can affect only:
+    //   - diffuse
+    //   - specular
+    // while ambient remains visible.
     float3 albedo = SampleDiffuse(uv).rgb;
     float3 specMap = float3(1.0f, 1.0f, 1.0f);
 
