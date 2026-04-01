@@ -15,6 +15,11 @@ void ZenithRenderEngine::CreateRootSignature()
 	}
 
 	CD3DX12_DESCRIPTOR_RANGE1 ranges[3];
+  // Root layout summary:
+	//   table 0 -> all SRVs (pixel shader)
+	//   table 1 -> per-draw SceneData CBV (vertex shader)
+	//   root CBV -> per-mesh MaterialData (pixel shader)
+	//   table 3 -> LightingData CBV (pixel shader)
 	ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
 	ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
 	ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 2, 0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
@@ -27,6 +32,8 @@ void ZenithRenderEngine::CreateRootSignature()
 	rootParameters[3].InitAsDescriptorTable(1, &ranges[2], D3D12_SHADER_VISIBILITY_PIXEL);
 
 	D3D12_STATIC_SAMPLER_DESC sampler = {};
+  // Static samplers are baked into the root signature, so no descriptor heap
+	// slot is spent on the default texture sampler.
 	sampler.Filter = D3D12_FILTER_ANISOTROPIC;
 	sampler.MaxAnisotropy = 8;
 	sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -69,6 +76,7 @@ void ZenithRenderEngine::CreatePipelineState()
 	ThrowIfFailed(ReadDataFromFile(GetAssetFullPath(L"shaders_PSMain.cso").c_str(), &pPixelShaderData, &pixelShaderDataLength));
 
 	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+       // The byte offsets below must match the `Vertex` struct in `Mesh.h`.
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,    0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -77,6 +85,9 @@ void ZenithRenderEngine::CreatePipelineState()
 	};
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
+   // A graphics PSO packages most fixed-function state together with the shaders.
+	// In D3D12, changing rasterizer, blend, depth, shader bytecode, or input
+	// layout typically means binding a different PSO object.
 	psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
 	psoDesc.pRootSignature = m_rootSignature.Get();
 	psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
@@ -168,6 +179,8 @@ void ZenithRenderEngine::CreateShadowPipelineState()
 	psoDesc.VS = CD3DX12_SHADER_BYTECODE(pVertexShaderData, vertexShaderDataLength);
 	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pPixelShaderData, pixelShaderDataLength);
 	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+  // Shadow passes often bias depth slightly to reduce "shadow acne" caused by
+	// precision differences between shadow-map rasterization and later comparison.
 	psoDesc.RasterizerState.DepthBias = ShadowRasterDepthBias;
 	psoDesc.RasterizerState.SlopeScaledDepthBias = ShadowRasterSlopeScaledDepthBias;
 	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
@@ -176,6 +189,7 @@ void ZenithRenderEngine::CreateShadowPipelineState()
 	psoDesc.SampleMask = UINT_MAX;
 	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	psoDesc.NumRenderTargets = 0;
+   // A depth-only shadow pass does not output color, so RTV count is zero.
 	psoDesc.SampleDesc.Count = 1;
 	psoDesc.SampleDesc.Quality = 0;
 	psoDesc.DepthStencilState.DepthEnable = TRUE;
@@ -277,6 +291,8 @@ void ZenithRenderEngine::CreateTransparentPipelineState()
 	psoDesc.DepthStencilState.StencilEnable = FALSE;
 
 	auto& transparentBlend = psoDesc.BlendState.RenderTarget[0];
+    // Standard source-alpha blending. Depth testing stays enabled so transparent
+	// pixels still respect opaque geometry, but depth writes are disabled above.
 	transparentBlend.BlendEnable = TRUE;
 	transparentBlend.SrcBlend = D3D12_BLEND_SRC_ALPHA;
 	transparentBlend.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
@@ -423,6 +439,8 @@ void ZenithRenderEngine::CreateGridPipelineState()
 	psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	psoDesc.SampleMask = UINT_MAX;
 	psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+   // The grid is purely visual reference geometry, so it does not need to write
+	// depth and can use a lightweight line-list PSO.
 	psoDesc.NumRenderTargets = 1;
 	psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 	psoDesc.SampleDesc.Count = 1;

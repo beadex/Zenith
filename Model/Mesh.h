@@ -63,6 +63,8 @@ struct Texture {
 class Mesh
 {
 public:
+  // A `Mesh` is the draw-ready unit of geometry in the sample: one vertex/index
+	// buffer pair, one material constant buffer, and one set of textures.
 	// Constructor to initialize the mesh with vertices, indices, and textures
 	Mesh(ID3D12Device* device, ID3D12GraphicsCommandList* commandList, std::vector<Vertex> vertices, std::vector<UINT> indices, std::vector<Texture> textures, bool isTransparent, bool isDoubleSided);
 

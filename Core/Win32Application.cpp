@@ -42,6 +42,8 @@ int Win32Application::Run(D3D12Application* pApp, HINSTANCE hInstance, int nCmdS
 
 	// Initialize the window class.
 	WNDCLASSEX windowClass = { 0 };
+    // This is the plain Win32 shell around the renderer. D3D12 itself does not
+	// create windows; it renders into one provided by the platform layer.
 	windowClass.cbSize = sizeof(WNDCLASSEX);
 	windowClass.style = CS_HREDRAW | CS_VREDRAW;
 	windowClass.lpfnWndProc = WndProc;
@@ -87,6 +89,8 @@ int Win32Application::Run(D3D12Application* pApp, HINSTANCE hInstance, int nCmdS
 		else
 		{
 			m_timer.Tick();
+          // Update/render are driven only when the app is active or when a preview
+			// frame is explicitly requested by one of the tool windows.
 			if (!m_appPaused || m_renderRequested)
 			{
 				pApp->OnUpdate(m_timer);
@@ -126,6 +130,8 @@ LRESULT CALLBACK Win32Application::WndProc(HWND hWnd, UINT message, WPARAM wPara
 	case WM_ACTIVATE:
 		if (LOWORD(wParam) == WA_INACTIVE)
 		{
+         // Pausing the timer while inactive avoids large delta-time spikes when the
+			// user alt-tabs back after several seconds or minutes.
 			m_appPaused = true;
 			m_timer.Stop();
 		}
@@ -226,6 +232,8 @@ LRESULT CALLBACK Win32Application::WndProc(HWND hWnd, UINT message, WPARAM wPara
 		// -----------------------------------------------------------------------
 	case WM_COMMAND:
 	{
+      // Menus are first given to the generic shell (Exit). Everything else is
+		// forwarded to the app-specific command handler.
 		const UINT commandId = LOWORD(wParam);
 		if (commandId == IDM_EXIT)
 		{

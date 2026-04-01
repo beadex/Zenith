@@ -25,7 +25,8 @@ using Microsoft::WRL::ComPtr;
 class D3D12RenderContext
 {
 public:
-	// FrameCount thường là 2 cho Double Buffering hoặc 3 cho Triple Buffering
+  // Two back buffers are enough for this beginner sample: one can be displayed
+	// while the other is being rendered.
 	static const UINT FrameCount = 2;
 	// The first shadow-mapping step uses one fixed-size depth texture.
 	//
@@ -109,7 +110,7 @@ private:
 	void CreateResources(HWND hwnd);
 	void GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAdapter1** ppAdapter, bool requestHighPerformanceAdapter = false);
 
-	// Kích thước buffer
+    // Window dimensions used when creating the swap chain and depth buffer.
 	UINT m_width;
 	UINT m_height;
 	bool m_useWarp;

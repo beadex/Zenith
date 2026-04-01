@@ -6,6 +6,8 @@ using namespace RenderEngineDetail;
 
 void ZenithRenderEngine::UpdatePointLightHoverState(int x, int y)
 {
+   // The gizmo is picked in screen space instead of with a full triangle-level
+	// ray test. For this simple cube handle, a projected screen rectangle is enough.
 	if (!m_pointLightEnabled)
 	{
 		if (m_isPointLightHovered)
@@ -91,6 +93,8 @@ void ZenithRenderEngine::OnLeftButtonDown(int x, int y)
 	const XMVECTOR inverseView = XMMatrixInverse(nullptr, view).r[0];
 	UNREFERENCED_PARAMETER(inverseView);
 	const XMMATRIX viewInverse = XMMatrixInverse(nullptr, view);
+    // The drag plane is aligned to the camera so horizontal mouse motion feels like
+	// moving the light across the screen rather than through depth.
 	const XMVECTOR dragPlaneNormal = XMVector3Normalize(XMVector3TransformNormal(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), viewInverse));
 	const XMVECTOR dragPlanePoint = XMLoadFloat3(&m_pointLightPosition);
 
@@ -102,6 +106,8 @@ void ZenithRenderEngine::OnLeftButtonDown(int x, int y)
 	}
 
 	XMStoreFloat3(&m_pointLightDragPlanePoint, dragPlanePoint);
+   // Storing the initial hit offset prevents the gizmo from snapping its center
+	// directly under the cursor when dragging begins.
 	XMStoreFloat3(&m_pointLightDragPlaneNormal, dragPlaneNormal);
 	XMStoreFloat3(&m_pointLightDragOffset, dragPlanePoint - hitPoint);
 	m_isPointLightDragging = true;
@@ -143,6 +149,8 @@ void ZenithRenderEngine::OnMouseMove(int x, int y, WPARAM btnState)
 		if (shiftDown)
 		{
 			UNREFERENCED_PARAMETER(deltaX);
+            // Holding Shift switches to a simpler vertical-only edit mode. The amount
+			// moved per pixel scales with distance so dragging feels similar when zoomed in or out.
 			const float cameraDistanceToLight = XMVectorGetX(XMVector3Length(m_camera.GetPosition() - XMLoadFloat3(&m_pointLightPosition)));
 			const float worldUnitsPerPixel = (std::max)(0.01f, cameraDistanceToLight * PointLightVerticalDragSensitivity);
 			m_pointLightPosition.y -= static_cast<float>(deltaY) * worldUnitsPerPixel;
@@ -167,6 +175,7 @@ void ZenithRenderEngine::OnMouseMove(int x, int y, WPARAM btnState)
 
 	UpdatePointLightHoverState(x, y);
 
+   // If the point light is not being dragged, mouse motion falls back to camera control.
 	const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
 	m_camera.OnMouseMove(x, y, shiftDown);
 }

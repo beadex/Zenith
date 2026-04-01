@@ -12,6 +12,8 @@ D3D12Application::D3D12Application(UINT width, UINT height, std::wstring name) :
 	m_useWarpDevice(false),
 	m_aspectRatio(static_cast<float>(width) / static_cast<float>(height))
 {
+  // Asset lookup is based on the executable folder. That keeps shader blobs and
+	// other runtime files relocatable with the built app.
 	WCHAR assetsPath[512];
 	GetAssetsPath(assetsPath, _countof(assetsPath));
 	m_assetsPath = assetsPath;
@@ -29,6 +31,8 @@ D3D12Application::~D3D12Application()
 _Use_decl_annotations_
 void D3D12Application::ParseCommandLineArgs(WCHAR* argv[], int argc)
 {
+  // The sample supports one optional switch: forcing WARP. This is useful when
+	// learning D3D12 on machines without a suitable hardware adapter.
 	for (int i = 1; i < argc; ++i)
 	{
 		if (_wcsnicmp(argv[i], L"-warp", wcslen(argv[i])) == 0 || _wcsnicmp(argv[i], L"/warp", wcslen(argv[i])) == 0)
@@ -43,6 +47,8 @@ void D3D12Application::ParseCommandLineArgs(WCHAR* argv[], int argc)
 
 std::wstring D3D12Application::GetAssetFullPath(LPCWSTR assetName)
 {
+    // Most helper code works with full paths so it does not depend on the current
+	// working directory of Visual Studio or the launched executable.
 	return m_assetsPath + assetName;
 }
 

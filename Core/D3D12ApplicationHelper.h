@@ -35,6 +35,8 @@ inline void ThrowIfFailed(HRESULT hr)
 
 inline void GetAssetsPath(_Out_writes_(pathSize) WCHAR* path, UINT pathSize)
 {
+    // Asset lookup is based on the executable directory so the app can find shader
+    // blobs and content regardless of the current working directory.
     if (path == nullptr)
     {
         throw std::exception();
@@ -56,6 +58,7 @@ inline void GetAssetsPath(_Out_writes_(pathSize) WCHAR* path, UINT pathSize)
 
 inline HRESULT ReadDataFromFile(LPCWSTR filename, byte** data, UINT* size)
 {
+ // This helper is used mainly for precompiled shader bytecode (`.cso`) files.
     using namespace Microsoft::WRL;
 
 #if WINVER >= _WIN32_WINNT_WIN8
@@ -187,7 +190,7 @@ inline void SetNameIndexed(ID3D12Object*, LPCWSTR, UINT)
 
 inline UINT CalculateConstantBufferByteSize(UINT byteSize)
 {
-    // Constant buffer size is required to be aligned.
+  // CBV sizes must be rounded up to 256-byte boundaries before creating the view.
     return (byteSize + (D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1)) & ~(D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT - 1);
 }
 

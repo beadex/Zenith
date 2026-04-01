@@ -6,6 +6,9 @@
 class D3D12Application
 {
 public:
+   // This abstract base class separates the platform/app shell from the actual
+	// renderer. `Win32Application` drives the message loop, while subclasses such
+	// as `ZenithRenderEngine` implement the graphics-specific lifecycle.
 	D3D12Application(UINT width, UINT height, std::wstring name);
 	virtual ~D3D12Application();
 
@@ -46,6 +49,8 @@ protected:
 	float m_aspectRatio;
 
 	// Render system
+    // The render context owns the low-level D3D12 objects: device, swap chain,
+	// command list, descriptor heaps, depth buffers, and synchronization.
 	std::unique_ptr<D3D12RenderContext> m_renderContext;
 
 	bool m_useWarpDevice;

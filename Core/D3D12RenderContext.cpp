@@ -41,6 +41,8 @@ namespace
 		const DirectX::Image image = {
 			   width,
 			   height,
+        // The sample currently saves the back buffer as 8-bit sRGB PNG. If the
+		   // swap-chain format changes in the future, this conversion point matters.
 			   DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
 			   footprint.Footprint.RowPitch,
 			   static_cast<SIZE_T>(footprint.Footprint.RowPitch) * height,
@@ -174,6 +176,8 @@ void D3D12RenderContext::CreateDevice(bool useWarp)
 void D3D12RenderContext::CreateResources(HWND hwnd)
 {
 	const DXGI_SAMPLE_DESC sampleDesc = { m_4xMsaaQuality, m_4xMsaaQuality - 1 };
+   // This sample keeps the window depth buffer and the shadow-map depth buffers
+	// in the same render context because they are all low-level render targets.
 	// The swap chain owns the back buffers that are presented to the window.
 	// Double buffering is used here via FrameCount = 2.
 	{
@@ -279,6 +283,8 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 
 		for (UINT faceIndex = 0; faceIndex < PointShadowFaceCount; ++faceIndex)
 		{
+           // Each point-shadow face is just another depth texture plus SRV/DSV pair.
+			// Conceptually they behave like the 6 faces of a cubemap.
             D3D12_RESOURCE_DESC pointShadowDesc = shadowDesc;
 			pointShadowDesc.Width = PointShadowMapWidth;
 			pointShadowDesc.Height = PointShadowMapHeight;
@@ -367,6 +373,8 @@ bool D3D12RenderContext::Present(const std::wstring& capturePath)
 
 	if (captureRequested)
 	{
+        // Capture is implemented inside `Present()` because this is the point where
+		// the final back buffer for the frame definitely exists and is ready to copy.
 		// To save an image, the render target is copied into a READBACK buffer that
 		  // the CPU can map. The back buffer itself is not directly CPU-readable.
 		const D3D12_RESOURCE_DESC renderTargetDesc = m_renderTargets[m_frameIndex]->GetDesc();

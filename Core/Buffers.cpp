@@ -9,6 +9,8 @@ using namespace RenderEngineDetail;
 void ZenithRenderEngine::CreateSceneDataConstantBuffer()
 {
 	auto device = m_renderContext->GetDevice();
+   // D3D12 constant-buffer views require 256-byte alignment even when the actual
+	// C++ struct is smaller.
 	UINT constantBufferSize = (sizeof(SceneDataConstantBuffer) + 255) & ~255;
 
 	ThrowIfFailed(device->CreateCommittedResource(
@@ -20,6 +22,8 @@ void ZenithRenderEngine::CreateSceneDataConstantBuffer()
 		IID_PPV_ARGS(&m_sceneDataConstantBuffer)));
 
 	CD3DX12_RANGE readRange(0, 0);
+  // Upload heaps may stay persistently mapped for CPU-written data such as per-
+	// frame constant buffers.
 	ThrowIfFailed(m_sceneDataConstantBuffer->Map(0, &readRange, reinterpret_cast<void**>(&m_pSceneDataCbvDataBegin)));
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
 }
@@ -49,6 +53,8 @@ void ZenithRenderEngine::CreatePointShadowSceneDataConstantBuffers()
 
 	for (UINT faceIndex = 0; faceIndex < PointShadowFaceCount; ++faceIndex)
 	{
+      // Each point-shadow face needs its own view/projection pair, so each face
+		// also gets its own SceneData constant buffer.
 		ThrowIfFailed(device->CreateCommittedResource(
 			&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 			D3D12_HEAP_FLAG_NONE,
@@ -89,6 +95,8 @@ void ZenithRenderEngine::CreateLightingDataConstantBuffer()
 
 void ZenithRenderEngine::CreateGridVertexBuffer(float radius)
 {
+   // The grid scale adapts to the loaded model so the scene reference remains
+	// useful for both small and large assets.
 	constexpr int halfLineCount = 10;
 	const float spacing = (std::max)(1.0f, ceilf((std::max)(radius, 1.0f) / static_cast<float>(halfLineCount)));
 	const float extent = static_cast<float>(halfLineCount) * spacing;
@@ -141,6 +149,8 @@ void ZenithRenderEngine::CreateGridVertexBuffer(float radius)
 
 void ZenithRenderEngine::CreatePointLightGizmoVertexBuffer()
 {
+ // The point-light gizmo is just a wireframe cube. Drawing it with the same
+	// line-vertex format as the grid keeps the helper geometry simple.
 	const XMFLOAT3 color = m_isPointLightHovered ? MakePointLightHoverColor(m_pointLightColor) : m_pointLightColor;
 	const GridVertex vertices[] = {
 		{ XMFLOAT3(-0.5f, -0.5f, -0.5f), color },
@@ -255,6 +265,8 @@ void ZenithRenderEngine::CreatePointLightSceneDataConstantBuffer()
 
 void ZenithRenderEngine::CreateGroundPlaneVertexBuffer(float radius)
 {
+  // The optional ground plane is regular triangle geometry so it can receive
+	// shadows exactly like a normal mesh.
 	const float extent = (std::max)(10.0f, radius * 1.5f);
 	const Vertex vertices[] = {
 		{ XMFLOAT3(-extent, 0.0f, -extent), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT2(0.0f, 0.0f) },
@@ -336,6 +348,8 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 	}
 
 	m_renderContext->WaitForGpu();
+    // Waiting here keeps the sample safe and easy to reason about: old model
+	// resources are no longer in flight when they are replaced.
 	m_model.reset();
 	m_modelOffset = XMFLOAT3(0.0f, 0.0f, 0.0f);
 
@@ -355,6 +369,8 @@ void ZenithRenderEngine::LoadModelFromPath(const std::wstring& path)
 	const XMFLOAT3 boundsCenter = model->GetBoundsCenter();
 	const XMFLOAT3 boundsMin = model->GetBoundsMin();
 	const float boundsRadius = model->GetBoundsRadius();
+   // The viewer recenters the asset horizontally and lifts it so its minimum Y
+	// sits on the ground plane instead of around the imported origin.
 	m_modelOffset = XMFLOAT3(-boundsCenter.x, -boundsMin.y, -boundsCenter.z);
 	m_camera.FrameBoundingSphere(XMFLOAT3(0.0f, boundsCenter.y - boundsMin.y, 0.0f), boundsRadius);
 	CreateGridVertexBuffer(boundsRadius);

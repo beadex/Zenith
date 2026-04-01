@@ -32,6 +32,13 @@ ZenithRenderEngine::ZenithRenderEngine(UINT width, UINT height, std::wstring nam
 
 void ZenithRenderEngine::OnInit()
 {
+   // The initialization order is intentionally linear and explicit.
+	// A beginner can read this top-to-bottom and see the renderer come together:
+	//   1. low-level D3D12 context
+	//   2. root signature + PSOs
+	//   3. constant buffers
+	//   4. helper geometry such as grid / gizmo / ground plane
+	//   5. runtime UI state
 	INITCOMMONCONTROLSEX commonControls = {};
 	commonControls.dwSize = sizeof(commonControls);
 	commonControls.dwICC = ICC_BAR_CLASSES;
@@ -131,6 +138,8 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 	UNREFERENCED_PARAMETER(timer);
 	m_camera.Update();
 
+ // The world matrix is currently just a translation used to place the loaded
+	// model so its base sits on the ground plane and its center is near the origin.
 	const XMMATRIX translate = XMMatrixTranslation(
 		m_modelOffset.x,
 		m_modelOffset.y,
@@ -139,6 +148,8 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 
 	const XMMATRIX view = m_camera.GetViewMatrix();
 	const XMMATRIX proj = m_camera.GetProjectionMatrix();
+  // Normals cannot always be transformed with the same matrix as positions.
+	// The inverse-transpose keeps them correct if non-uniform scaling is added.
 	const XMMATRIX normalMat = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
 
 	XMFLOAT3 directionalLightDirection = m_directionalLightDirection;
@@ -178,6 +189,8 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 
 	const XMVECTOR lightPosition = shadowTargetVector - lightDirection * (shadowBoundsRadius * 2.5f);
 	const XMMATRIX lightView = XMMatrixLookAtLH(lightPosition, shadowTargetVector, lightUp);
+	// The directional shadow uses an orthographic projection because sunlight rays
+	// are treated as parallel rather than radiating from a local point.
 
 	const XMFLOAT3 shadowCorners[] = {
 		XMFLOAT3(shadowBoundsMin.x, shadowBoundsMin.y, shadowBoundsMin.z),
@@ -198,6 +211,8 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 	float maxLightZ = -FLT_MAX;
 	for (const XMFLOAT3& corner : shadowCorners)
 	{
+        // Fitting the shadow frustum in light space makes better use of the shadow
+		// texture resolution than using one oversized fixed orthographic box.
 		const XMVECTOR lightSpaceCorner = XMVector3TransformCoord(XMLoadFloat3(&corner), lightView);
 		const float lightX = XMVectorGetX(lightSpaceCorner);
 		const float lightY = XMVectorGetY(lightSpaceCorner);
@@ -269,6 +284,9 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 
 	for (UINT faceIndex = 0; faceIndex < PointShadowFaceCount; ++faceIndex)
 	{
+      // Point-light shadows need six camera views, one per cube direction.
+		// This sample stores them as six separate 2D depth textures instead of a
+		// true cubemap to keep the setup approachable.
 		const XMMATRIX pointShadowView = XMMatrixLookAtLH(
 			pointLightPositionVector,
 			pointLightPositionVector + pointShadowDirections[faceIndex],
@@ -322,6 +340,8 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 		m_pointLightEnabled ? 1.0f : 0.0f);
 
 	memcpy(m_pSceneDataCbvDataBegin, &m_sceneDataCbData, sizeof(m_sceneDataCbData));
+  // These constant buffers stay persistently mapped, so per-frame updates are
+	// simple CPU memcpy calls into upload-heap memory.
 	memcpy(m_pPointLightSceneDataCbvDataBegin, &m_pointLightSceneDataCbData, sizeof(m_pointLightSceneDataCbData));
 	memcpy(m_pGroundPlaneSceneDataCbvDataBegin, &m_groundPlaneSceneDataCbData, sizeof(m_groundPlaneSceneDataCbData));
 	memcpy(m_pShadowSceneDataCbvDataBegin, &m_shadowSceneDataCbData, sizeof(m_shadowSceneDataCbData));
@@ -341,6 +361,8 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	std::wstring capturePath = std::move(m_pendingRenderImagePath);
 	m_pendingRenderImagePath.clear();
 
+ // `Prepare()` opens the command list and transitions the current back buffer
+	// from PRESENT into RENDER_TARGET so the frame can start recording.
 	m_renderContext->Prepare();
 
 	auto commandList = m_renderContext->GetCommandList();
@@ -357,6 +379,8 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	const UINT groundPlaneSceneDescriptorIndex = cbvSrvUavAllocator->AllocateDynamicDescriptor();
 	const UINT sceneDescriptorIndex = cbvSrvUavAllocator->AllocateDynamicDescriptor();
 	const UINT lightingDescriptorIndex = cbvSrvUavAllocator->AllocateDynamicDescriptor();
+	// These descriptors live only for the current frame. The underlying constant
+	// buffer resources persist, but the shader-visible CBV table is rebuilt each frame.
 
 	D3D12_CONSTANT_BUFFER_VIEW_DESC shadowSceneCbvDesc = {};
 	shadowSceneCbvDesc.BufferLocation = m_shadowSceneDataConstantBuffer->GetGPUVirtualAddress();
@@ -392,6 +416,7 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 
 	if (m_model)
 	{
+     // Pass 1: render from the light into the directional shadow map.
 		auto shadowToDepthWrite = CD3DX12_RESOURCE_BARRIER::Transition(
 			m_renderContext->GetShadowMap(),
 			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
@@ -419,6 +444,7 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 
 		if (m_pointLightEnabled)
 		{
+         // Pass 2: render six point-light shadow faces.
 			for (UINT faceIndex = 0; faceIndex < PointShadowFaceCount; ++faceIndex)
 			{
 				auto pointShadowToDepthWrite = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -457,6 +483,8 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 	}
 
 	commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+  // Pass 3: render the visible scene from the camera using the shadow maps
+	// produced above.
 	commandList->SetGraphicsRootDescriptorTable(1, cbvSrvUavAllocator->GetDynamicGpuHandle(sceneDescriptorIndex));
 	commandList->SetGraphicsRootDescriptorTable(3, cbvSrvUavAllocator->GetDynamicGpuHandle(lightingDescriptorIndex));
 	commandList->RSSetViewports(1, &m_viewport);
@@ -497,6 +525,8 @@ void ZenithRenderEngine::OnRender(const Timer& timer)
 
 	if (m_model)
 	{
+        // Opaque meshes render first so they populate depth. Transparent meshes are
+		// then drawn back-to-front with depth writes disabled in their PSOs.
 		m_model->DrawOpaque(commandList, false);
 		commandList->SetPipelineState(m_doubleSidedPipelineState.Get());
 		m_model->DrawOpaque(commandList, true);

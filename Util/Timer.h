@@ -3,6 +3,8 @@
 class Timer
 {
 public:
+    // Lightweight wrapper over `QueryPerformanceCounter`, which is the standard
+	// high-resolution timer used by many Windows game/render loops.
 	Timer();
 
 	float TotalTime() const; // in seconds

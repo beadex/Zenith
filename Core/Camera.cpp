@@ -34,6 +34,8 @@ void Camera::FrameBoundingSphere(const XMFLOAT3& center, float radius)
     m_target = center;
     m_focusRadius = max(radius, 0.1f);
 
+   // To fit a sphere in view, the required camera distance is derived from the
+    // more restrictive of the horizontal and vertical half-FOV angles.
     const float halfFovY = m_fovY * 0.5f;
     const float halfFovX = atanf(tanf(halfFovY) * m_aspect);
     const float limitingHalfFov = (std::min)(halfFovX, halfFovY);
@@ -66,6 +68,8 @@ void Camera::OnMouseMove(int x, int y, bool shiftDown)
 
     if (shiftDown)
     {
+     // Panning moves the target point, not the angles. That keeps orbit behavior
+        // stable because the camera still looks toward the same logical focus point.
         const float cosP = cosf(m_phi);
         const float sinP = sinf(m_phi);
         const float cosT = cosf(m_theta);
@@ -102,6 +106,8 @@ void Camera::OnMouseMove(int x, int y, bool shiftDown)
 void Camera::OnMouseWheel(float wheelDelta)
 {
     const float notches = wheelDelta / static_cast<float>(WHEEL_DELTA);
+  // Zoom is exponential with respect to the current radius, which feels more
+    // natural than subtracting a fixed world-space amount every wheel step.
     m_radius *= (1.0f - notches * kZoomSpeed);
     m_radius = max(0.1f, m_radius);
     UpdateClipPlanes();
@@ -117,6 +123,8 @@ void Camera::UpdateClipPlanes()
     if (m_focusRadius <= 0.0f)
         return;
 
+ // Near/far planes are adapted to the framed object. Tight clip planes improve
+    // depth precision, which in turn helps reduce z-fighting and shadow artifacts.
     const float padding = m_focusRadius * 0.5f;
     m_nearZ = max(0.01f, m_radius - m_focusRadius - padding);
     m_farZ = (std::max)(m_nearZ + 1.0f, m_radius + m_focusRadius + padding);

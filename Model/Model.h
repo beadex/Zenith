@@ -6,6 +6,8 @@
 class Model
 {
 public:
+   // `Model` is the bridge between import-time asset data and draw-time mesh data.
+	// It owns mesh objects, material/texture bookkeeping, and overall bounds.
 	// Constructor to initialize the model with a file path to the model data
 	Model(CbvSrvUavAllocator* descriptorAllocator, ID3D12Device* device, ID3D12GraphicsCommandList* commandList, const std::string& path);
 	~Model();

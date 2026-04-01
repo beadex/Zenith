@@ -163,6 +163,8 @@ void Model::LoadModel(const std::string& path)
 		aiProcess_JoinIdenticalVertices |
 		aiProcess_Triangulate |
 		aiProcess_PreTransformVertices |
+     // D3D uses a left-handed clip-space convention in this sample, so imported
+		// geometry is converted once up front instead of compensating everywhere later.
 		aiProcess_ConvertToLeftHanded |
 		// Tangent-space normal mapping needs a tangent basis per vertex.
 		// Assimp can generate that basis for meshes that provide valid UVs.
@@ -255,6 +257,8 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		m_boundsMax.x = (std::max)(m_boundsMax.x, vector.x);
 		m_boundsMax.y = (std::max)(m_boundsMax.y, vector.y);
 		m_boundsMax.z = (std::max)(m_boundsMax.z, vector.z);
+		// These bounds are accumulated while vertices are read so the viewer can
+		// frame the model and fit the directional shadow box later.
 
 		// Process vertex normals
 		if (mesh->HasNormals())
@@ -419,6 +423,8 @@ Mesh Model::ProcessMesh(aiMesh* mesh, const aiScene* scene)
 		}
 
 		Mesh result(m_device, m_commandList, std::move(vertices), std::move(indices), std::move(textures), isTransparent, isDoubleSided);
+       // Mesh construction uploads geometry immediately; texture upload happens later
+		// as a separate batch once all materials have been inspected.
 		result.SetMaterialData(materialData);
 		return result;
 	}
@@ -459,6 +465,8 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 
 		if (m_loadedPaths.count(texture.path))
 		{
+            // Already parsed this source image for another mesh/material in the same
+			// model load, so only lightweight metadata needs to be reused.
 			texture.hasAlpha = m_textureTransparencyCache[texture.path];
 			textures.push_back(std::move(texture));
 			continue;
@@ -484,6 +492,7 @@ std::vector<Texture> Model::LoadMaterialTextures(aiMaterial* mat, aiTextureType 
 
 			if (embeddedTex->mHeight == 0)
 			{
+             // Assimp uses `mHeight == 0` to mean "compressed blob" rather than raw pixels.
 				// Compressed image stored as a raw byte blob (PNG, JPG, DDS, etc.)
 				// mWidth holds the buffer size in bytes
 				const size_t size = embeddedTex->mWidth;
@@ -703,6 +712,8 @@ UINT Model::UploadTextureToHeap(Texture& texture)
 
 void Model::ReleaseUploadBuffers()
 {
+ // After the upload command list has completed, only the final GPU textures and
+	// buffers are needed. The staging/upload resources can be discarded.
 	m_textureUploadBuffers.clear();
 	for (auto& mesh : m_meshes)
 		mesh.ReleaseUploadBuffers();

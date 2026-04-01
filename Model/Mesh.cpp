@@ -92,6 +92,8 @@ void Mesh::CreateVertexAndIndexBuffers(ID3D12Device* device, ID3D12GraphicsComma
 {
 	const UINT vertexBufferSize = m_vertexCount * sizeof(Vertex);
 	const UINT indexBufferSize = m_indexCount * sizeof(UINT);
+	// The constructor records upload commands but does not execute them. Execution
+	// happens later through the render context's upload path.
 
 	// 1. Create GPU-only DEFAULT heap buffers.
 	  // These are the final runtime resources used by the input assembler.
@@ -143,6 +145,8 @@ void Mesh::CreateVertexAndIndexBuffers(ID3D12Device* device, ID3D12GraphicsComma
 	m_indexUploadBuffer->Unmap(0, nullptr);
 
 	// 4. Record the GPU-side copy from upload heap into final default heap.
+    // `CopyBufferRegion` assumes the destination is already in `COPY_DEST`, which is
+	// the initial state returned by the helper resource creation above.
 	commandList->CopyBufferRegion(m_vertexBuffer.Get(), 0, m_vertexUploadBuffer.Get(), 0, vertexBufferSize);
 	commandList->CopyBufferRegion(m_indexBuffer.Get(), 0, m_indexUploadBuffer.Get(), 0, indexBufferSize);
 
@@ -173,6 +177,8 @@ void Mesh::CreateMaterialConstantBuffer(ID3D12Device* device)
 
 	// MaterialData is tiny, so keeping it in an UPLOAD heap is a good trade-off:
 	// simpler code, easy CPU updates, no separate upload staging path needed.
+  // For large vertex/index data, an UPLOAD heap would be too slow for rendering,
+	// but for tiny constant buffers it is perfectly reasonable.
 	ThrowIfFailed(device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,

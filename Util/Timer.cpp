@@ -10,6 +10,8 @@ Timer::Timer() :
 	m_currTime(0),
 	m_stopped(false)
 {
+    // Query the hardware timer frequency once, then convert all future counter
+	// differences into seconds by multiplying with `m_secondsPerCount`.
 	UINT64 countsPerSec;
 	QueryPerformanceFrequency((LARGE_INTEGER*)&countsPerSec);
 	m_secondsPerCount = 1.0 / (double)countsPerSec;
@@ -111,6 +113,8 @@ void Timer::Tick()
 	QueryPerformanceCounter((LARGE_INTEGER*)&currTime);
 	m_currTime = currTime;
 
+ // Delta time is the frame duration used by camera movement, animation, and
+	// any other time-based updates.
 	// Time difference between this frame and the previous.
 	m_deltaTime = (m_currTime - m_prevTime) * m_secondsPerCount;
 

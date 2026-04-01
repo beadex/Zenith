@@ -41,7 +41,7 @@ public:
 
 private:
     float m_theta;    // azimuth  – rotation around world Y (radians)
-    float m_phi;      // elevation above XZ plane            (radians, clamped)
+ float m_phi;      // elevation above XZ plane (radians). This sample intentionally allows full orbit.
     float m_radius;   // distance from orbit target
     float m_focusRadius;
     XMFLOAT3 m_target;

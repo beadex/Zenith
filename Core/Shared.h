@@ -2,6 +2,8 @@
 
 namespace RenderEngineDetail
 {
+  // Shared constants/helpers for the renderer live in this header so multiple
+	// source files can use the same UI IDs and math utilities without duplication.
 	constexpr wchar_t DirectionalLightConfigWindowClassName[] = L"ZenithDirectionalLightConfigWindow";
 	constexpr int DirectionalLightEnabledCheckId = 1101;
 	constexpr int DirectionalLightDirectionXEditId = 1102;
@@ -62,6 +64,8 @@ namespace RenderEngineDetail
 
 	inline bool TryBuildMouseRay(int x, int y, float viewportWidth, float viewportHeight, FXMMATRIX view, CXMMATRIX projection, MouseRay& ray)
 	{
+        // Unprojecting one point at z=0 and one at z=1 converts a 2D mouse position
+		// into a 3D world-space picking ray.
 		if (viewportWidth <= 0.0f || viewportHeight <= 0.0f)
 		{
 			return false;
@@ -98,6 +102,8 @@ namespace RenderEngineDetail
 
 	inline bool TryIntersectPlane(FXMVECTOR rayOrigin, FXMVECTOR rayDirection, FXMVECTOR planePoint, FXMVECTOR planeNormal, XMVECTOR& hitPoint)
 	{
+        // Plane intersection is enough for the point-light drag tool because the gizmo
+		// movement is constrained to a chosen edit plane rather than full 3D free-move.
 		const float denominator = XMVectorGetX(XMVector3Dot(rayDirection, planeNormal));
 		if (fabsf(denominator) < 1e-5f)
 		{

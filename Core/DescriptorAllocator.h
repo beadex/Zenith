@@ -145,6 +145,9 @@ public:
 		// At frame begin, all currently-live static descriptors are copied into the
 		 // current shader-visible heap. After that, dynamic per-frame descriptors are
 		 // allocated after the copied static range.
+       // This design sidesteps one of the first D3D12 descriptor questions beginners
+		// run into: long-lived textures want stable descriptor slots, while per-frame
+		// CBVs want cheap temporary slots.
 		m_currentFrameIndex = frameIndex;
 		m_dynamicDescriptorCounts[m_currentFrameIndex] = m_staticDescriptorCount;
 		if (m_staticDescriptorCount == 0)

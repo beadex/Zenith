@@ -10,6 +10,8 @@ using namespace RenderEngineDetail;
 
 void ZenithRenderEngine::UpdateLightingMenuState() const
 {
+  // The menus reflect runtime state so the UI always tells the user which
+	// optional helpers and lights are currently active.
 	HMENU menu = GetMenu(Win32Application::GetHwnd());
 	if (!menu)
 	{
@@ -47,6 +49,8 @@ void ZenithRenderEngine::EnsureDirectionalLightConfigWindow()
 	}
 
 	WNDCLASSEXW windowClass = {};
+   // These tool windows are custom Win32 windows rather than dialog resources so
+	// their structure stays visible in code for learners.
 	windowClass.cbSize = sizeof(windowClass);
 	windowClass.lpfnWndProc = &ZenithRenderEngine::DirectionalLightConfigWindowProc;
 	windowClass.hInstance = GetModuleHandleW(nullptr);
@@ -88,6 +92,8 @@ void ZenithRenderEngine::ShowDirectionalLightConfigWindow()
 
 void ZenithRenderEngine::SyncDirectionalLightConfigWindow() const
 {
+    // Synchronization always flows from renderer state -> controls. That makes the
+	// sliders/edit boxes a view of the true lighting data, not the other way around.
 	if (!m_directionalLightConfigWindow)
 	{
 		return;
@@ -182,6 +188,8 @@ void ZenithRenderEngine::ApplyDirectionalLightConfigFromWindow()
 	}
 
 	XMVECTOR direction = XMVectorSet(
+      // The UI exposes editable XYZ values, but the runtime still expects a usable
+		// non-zero direction vector.
 		(std::clamp)(directionX, -1.0f, 1.0f),
 		(std::clamp)(directionY, -1.0f, 1.0f),
 		(std::clamp)(directionZ, -1.0f, 1.0f),
@@ -236,6 +244,8 @@ void ZenithRenderEngine::SetPointLightEnabled(bool enabled)
 	}
 
 	m_pointLightEnabled = enabled;
+    // Enabling the point light is treated as enabling the whole feature: runtime
+	// shading, point-shadow generation, gizmo drawing, and config window.
 	if (m_pointLightEnabled)
 	{
 		ShowPointLightConfigWindow();
@@ -383,6 +393,8 @@ void ZenithRenderEngine::ApplyPointLightConfigFromWindow()
 
 void ZenithRenderEngine::ChoosePointLightColor()
 {
+  // The Win32 common color picker returns 8-bit RGB values, which are then
+	// converted back into the renderer's normalized 0..1 float representation.
 	CHOOSECOLORW chooseColor = {};
 	COLORREF customColors[16] = {};
 	COLORREF initialColor = FloatColorToColorRef(m_pointLightColor);
@@ -446,6 +458,8 @@ LRESULT CALLBACK ZenithRenderEngine::DirectionalLightConfigWindowProc(HWND hwnd,
 		}
 
 		HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+      // The window is composed manually from standard Win32 controls so readers can
+		// see exactly how sliders, edits, and buttons map to renderer state.
 		engine->m_directionalLightEnabledCheck = CreateWindowW(L"BUTTON", L"Enabled", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 12, 12, 90, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(DirectionalLightEnabledCheckId)), nullptr, nullptr);
 		CreateWindowW(L"STATIC", L"Direction X", WS_CHILD | WS_VISIBLE, 12, 46, 80, 20, hwnd, nullptr, nullptr, nullptr);
 		engine->m_directionalLightDirectionXSlider = CreateWindowExW(0, TRACKBAR_CLASSW, L"", WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS, 100, 42, 120, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(DirectionalLightDirectionXSliderId)), nullptr, nullptr);
@@ -524,6 +538,8 @@ LRESULT CALLBACK ZenithRenderEngine::DirectionalLightConfigWindowProc(HWND hwnd,
 			break;
 		}
 
+     // Slider changes update renderer values immediately so the user gets live
+		// visual feedback without pressing Apply.
 		if (reinterpret_cast<HWND>(lParam) == engine->m_directionalLightStrengthSlider)
 		{
 			engine->m_directionalLightStrength = SliderPositionToFloat(static_cast<int>(SendMessageW(engine->m_directionalLightStrengthSlider, TBM_GETPOS, 0, 0)));
@@ -608,6 +624,8 @@ LRESULT CALLBACK ZenithRenderEngine::PointLightConfigWindowProc(HWND hwnd, UINT 
 		}
 
 		HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+      // The point-light window mirrors the directional-light layout on purpose so
+		// both editing experiences teach the same UI pattern.
 		CreateWindowW(L"STATIC", L"Strength", WS_CHILD | WS_VISIBLE, 12, 14, 80, 20, hwnd, nullptr, nullptr, nullptr);
 		engine->m_pointLightStrengthSlider = CreateWindowExW(0, TRACKBAR_CLASSW, L"", WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS, 100, 10, 92, 32, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(PointLightStrengthSliderId)), nullptr, nullptr);
 		engine->m_pointLightStrengthEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 198, 12, 52, 24, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(PointLightStrengthEditId)), nullptr, nullptr);

@@ -96,6 +96,8 @@ private:
 
 	struct GridVertex
 	{
+      // A compact vertex for simple line rendering. Grid lines and the point-light
+		// gizmo do not need normals, tangents, UVs, or indexing.
 		XMFLOAT3 Position;
 		XMFLOAT3 Color;
 	};
@@ -123,6 +125,8 @@ private:
 
 	struct DirectionalLightData
 	{
+     // The sample uses a classic ambient + diffuse + specular layout instead of a
+		// full physically based light model to keep the shading math approachable.
 		XMFLOAT4 direction;
 		XMFLOAT4 ambient;
 		XMFLOAT4 diffuse;
