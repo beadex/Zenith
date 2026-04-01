@@ -34,5 +34,6 @@
 #include <memory.h>
 #include <tchar.h>
 #include <commdlg.h>
+#include <commctrl.h>
 #include <algorithm>
 #include <cfloat>

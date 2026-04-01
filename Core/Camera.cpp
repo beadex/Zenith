@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "Camera.h"
-#include <algorithm>
 
 using std::max;
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "D3D12Application.h"
-#include "Model.h"
+#include "Model/Model.h"
 #include "Camera.h"
 
 class ZenithRenderEngine : public D3D12Application

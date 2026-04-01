@@ -211,28 +211,40 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="Camera.h" />
-    <ClInclude Include="D3D12Application.h" />
-    <ClInclude Include="D3D12ApplicationHelper.h" />
-    <ClInclude Include="DescriptorAllocator.h" />
-    <ClInclude Include="framework.h" />
-    <ClInclude Include="Mesh.h" />
-    <ClInclude Include="Model.h" />
-    <ClInclude Include="pch.h" />
-    <ClInclude Include="D3D12RenderContext.h" />
-    <ClInclude Include="RenderEngine.h" />
-    <ClInclude Include="Resource.h" />
-    <ClInclude Include="targetver.h" />
-    <ClInclude Include="Timer.h" />
-    <ClInclude Include="Win32Application.h" />
+    <ClInclude Include="Core\Camera.h" />
+    <ClInclude Include="Core\Shared.h" />
+    <ClInclude Include="Core\D3D12Application.h" />
+    <ClInclude Include="Core\D3D12ApplicationHelper.h" />
+    <ClInclude Include="Core\DescriptorAllocator.h" />
+    <ClInclude Include="Core\framework.h" />
+    <ClInclude Include="Core\Model\Mesh.h" />
+    <ClInclude Include="Core\Model\Model.h" />
+    <ClInclude Include="Core\pch.h" />
+    <ClInclude Include="Core\D3D12RenderContext.h" />
+    <ClInclude Include="Core\RenderEngine.h" />
+    <ClInclude Include="Core\Resource.h" />
+    <ClInclude Include="Core\targetver.h" />
+    <ClInclude Include="Core\Utils\Timer.h" />
+    <ClInclude Include="Core\Win32Application.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Camera.cpp" />
-    <ClCompile Include="D3D12Application.cpp" />
-    <ClCompile Include="D3D12RenderContext.cpp" />
-    <ClCompile Include="Mesh.cpp" />
-    <ClCompile Include="Model.cpp" />
-    <ClCompile Include="pch.cpp">
+    <ClCompile Include="Core\Camera.cpp" />
+    <ClCompile Include="Core\Buffers.cpp" />
+    <ClCompile Include="Core\RenderEngine.cpp" />
+    <ClCompile Include="Core\Input.cpp" />
+    <ClCompile Include="Core\LightUI.cpp" />
+    <ClCompile Include="Core\Pipeline.cpp" />
+    <ClCompile Include="Core\D3D12Application.cpp" />
+    <ClCompile Include="Core\D3D12RenderContext.cpp" />
+    <ClCompile Include="Core\Model\Mesh.cpp">
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">../pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">../pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="Core\Model\Model.cpp">
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">../pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">../pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="Core\pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
@@ -240,17 +252,19 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="RenderEngine.cpp" />
-    <ClCompile Include="Timer.cpp" />
-    <ClCompile Include="Win32Application.cpp" />
-    <ClCompile Include="Zenith.cpp" />
+    <ClCompile Include="Core\Utils\Timer.cpp">
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">../pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">../pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <ClCompile Include="Core\Win32Application.cpp" />
+    <ClCompile Include="Core\Zenith.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="Zenith.rc" />
+    <ResourceCompile Include="Core\Zenith.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="small.ico" />
-    <Image Include="Zenith.ico" />
+    <Image Include="Core\small.ico" />
+    <Image Include="Core\Zenith.ico" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -258,7 +272,7 @@
     <None Include="vcpkg.json" />
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="shaders.hlsl">
+    <CustomBuild Include="Core\Shaders\shaders.hlsl">
       <FileType>Document</FileType>
       <DeploymentContent>true</DeploymentContent>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">dxc.exe -nologo -Tvs_6_0 -E"VSMain" -Zi -Qembed_debug -Fo"$(OutDir)%(Filename)_VSMain.cso" "%(FullPath)"

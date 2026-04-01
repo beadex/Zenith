@@ -15,78 +15,93 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="framework.h">
+    <ClInclude Include="Core\Camera.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="targetver.h">
+    <ClInclude Include="Core\Shared.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Resource.h">
+    <ClInclude Include="Core\D3D12Application.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="pch.h">
+    <ClInclude Include="Core\D3D12ApplicationHelper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="D3D12Application.h">
+    <ClInclude Include="Core\DescriptorAllocator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="D3D12ApplicationHelper.h">
+    <ClInclude Include="Core\framework.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="D3D12RenderContext.h">
+    <ClInclude Include="Core\Model\Mesh.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Timer.h">
+    <ClInclude Include="Core\Model\Model.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Win32Application.h">
+    <ClInclude Include="Core\pch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="RenderEngine.h">
+    <ClInclude Include="Core\D3D12RenderContext.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Mesh.h">
+    <ClInclude Include="Core\RenderEngine.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Model.h">
+    <ClInclude Include="Core\Resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Camera.h">
+    <ClInclude Include="Core\targetver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DescriptorAllocator.h">
+    <ClInclude Include="Core\Utils\Timer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Core\Win32Application.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Zenith.cpp">
+    <ClCompile Include="Core\RenderEngine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="pch.cpp">
+    <ClCompile Include="Core\Camera.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="D3D12Application.cpp">
+    <ClCompile Include="Core\Buffers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Timer.cpp">
+    <ClCompile Include="Core\Input.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Win32Application.cpp">
+    <ClCompile Include="Core\LightUI.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="D3D12RenderContext.cpp">
+    <ClCompile Include="Core\Pipeline.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="RenderEngine.cpp">
+    <ClCompile Include="Core\D3D12Application.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Mesh.cpp">
+    <ClCompile Include="Core\D3D12RenderContext.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Model.cpp">
+    <ClCompile Include="Core\Model\Mesh.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Camera.cpp">
+    <ClCompile Include="Core\Model\Model.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\pch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Utils\Timer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Win32Application.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Zenith.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -109,6 +124,6 @@
     <None Include="vcpkg-configuration.json" />
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="shaders.hlsl" />
+    <CustomBuild Include="Core\Shaders\shaders.hlsl" />
   </ItemGroup>
 </Project>

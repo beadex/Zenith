@@ -1,7 +1,7 @@
 #pragma once
 
 #include "D3D12Application.h"
-#include "Timer.h"
+#include "Utils/Timer.h"
 
 class Win32Application
 {
