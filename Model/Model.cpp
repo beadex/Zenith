@@ -1,6 +1,6 @@
-#include "../pch.h"
+#include "pch.h"
 #include "Model.h"
-#include "../D3D12ApplicationHelper.h"
+#include "Core/D3D12ApplicationHelper.h"
 
 using namespace DirectX;
 

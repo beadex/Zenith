@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Mesh.h"
-#include "../DescriptorAllocator.h"
+#include "Core/DescriptorAllocator.h"
 
 class Model
 {
