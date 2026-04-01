@@ -277,6 +277,27 @@ void D3D12RenderContext::CreateResources(HWND hwnd)
 		shadowSrvDesc.Texture2D.MipLevels = 1;
 		m_device->CreateShaderResourceView(m_shadowMap.Get(), &shadowSrvDesc, cbvSrvUavAllocator->GetStaticCpuHandle(m_shadowMapSrvIndex));
 
+		for (UINT faceIndex = 0; faceIndex < PointShadowFaceCount; ++faceIndex)
+		{
+            D3D12_RESOURCE_DESC pointShadowDesc = shadowDesc;
+			pointShadowDesc.Width = PointShadowMapWidth;
+			pointShadowDesc.Height = PointShadowMapHeight;
+
+			ThrowIfFailed(m_device->CreateCommittedResource(
+				&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+				D3D12_HEAP_FLAG_NONE,
+                &pointShadowDesc,
+				D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+				&shadowClear,
+				IID_PPV_ARGS(&m_pointShadowMaps[faceIndex])
+			));
+
+			m_device->CreateDepthStencilView(m_pointShadowMaps[faceIndex].Get(), &shadowDsvDesc, dsvAllocator->GetCpuHandle(2 + faceIndex));
+
+			m_pointShadowMapSrvIndices[faceIndex] = cbvSrvUavAllocator->AllocateStaticDescriptor();
+			m_device->CreateShaderResourceView(m_pointShadowMaps[faceIndex].Get(), &shadowSrvDesc, cbvSrvUavAllocator->GetStaticCpuHandle(m_pointShadowMapSrvIndices[faceIndex]));
+		}
+
 		m_rtvDescriptorSize = rtvAllocator->GetDescriptorSize();
 		m_dsvDescriptorSize = dsvAllocator->GetDescriptorSize();
 	}

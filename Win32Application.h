@@ -8,12 +8,14 @@ class Win32Application
 public:
 	static int Run(D3D12Application* pApplication, HINSTANCE hInstance, int nCmdShow);
 	static HWND GetHwnd() { return m_hWnd; }
+	static void RequestRender();
 
 protected:
 	static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 	static Timer m_timer;
 
 	static bool m_appPaused;
+    static bool m_renderRequested;
 private:
 	static HMENU CreateApplicationMenu();
 	static HWND m_hWnd;

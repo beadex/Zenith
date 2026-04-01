@@ -268,7 +268,7 @@ public:
 	explicit DescriptorManager(UINT frameCount)
 		: m_cbvSrvUavAllocator(frameCount)
 		, m_rtvAllocator(frameCount)
-		, m_dsvAllocator(2)
+		, m_dsvAllocator(8)
 	{
 	}
 

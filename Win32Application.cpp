@@ -4,6 +4,7 @@
 HWND  Win32Application::m_hWnd = nullptr;
 Timer Win32Application::m_timer = Timer();
 bool  Win32Application::m_appPaused = false;
+bool  Win32Application::m_renderRequested = false;
 
 HMENU Win32Application::CreateApplicationMenu()
 {
@@ -19,8 +20,9 @@ HMENU Win32Application::CreateApplicationMenu()
 	AppendMenu(fileMenu, MF_SEPARATOR, 0, nullptr);
 	AppendMenu(fileMenu, MF_STRING, IDM_EXIT, L"Exit");
 	AppendMenu(renderMenu, MF_STRING, IDM_RENDER_IMAGE, L"Render Image...");
-	AppendMenu(viewMenu, MF_STRING | MF_CHECKED, IDM_VIEW_DIRECTIONAL_LIGHT, L"Directional Light");
+	AppendMenu(viewMenu, MF_STRING, IDM_VIEW_DIRECTIONAL_LIGHT, L"Directional Light...");
 	AppendMenu(viewMenu, MF_STRING, IDM_VIEW_SOLID_GROUND_PLANE, L"Solid Ground Plane");
+	AppendMenu(viewMenu, MF_STRING, IDM_VIEW_ADD_POINT_LIGHT, L"Add Point Light...");
 	AppendMenu(helpMenu, MF_STRING, IDM_ABOUT, L"About");
 
 	AppendMenu(menuBar, MF_POPUP, reinterpret_cast<UINT_PTR>(fileMenu), L"Files");
@@ -85,10 +87,11 @@ int Win32Application::Run(D3D12Application* pApp, HINSTANCE hInstance, int nCmdS
 		else
 		{
 			m_timer.Tick();
-			if (!m_appPaused)
+			if (!m_appPaused || m_renderRequested)
 			{
 				pApp->OnUpdate(m_timer);
 				pApp->OnRender(m_timer);
+				m_renderRequested = false;
 			}
 			else
 			{
@@ -99,6 +102,15 @@ int Win32Application::Run(D3D12Application* pApp, HINSTANCE hInstance, int nCmdS
 
 	pApp->OnDestroy();
 	return static_cast<char>(msg.wParam);
+}
+
+void Win32Application::RequestRender()
+{
+	m_renderRequested = true;
+	if (m_hWnd)
+	{
+		PostMessage(m_hWnd, WM_NULL, 0, 0);
+	}
 }
 
 LRESULT CALLBACK Win32Application::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -158,8 +170,24 @@ LRESULT CALLBACK Win32Application::WndProc(HWND hWnd, UINT message, WPARAM wPara
 		return 0;
 
 		// -----------------------------------------------------------------------
-		// Mouse – Middle Button (Orbit / Pan)
-		// -----------------------------------------------------------------------
+		  // Mouse – Left / Middle Button
+		  // -----------------------------------------------------------------------
+	case WM_LBUTTONDOWN:
+		if (pApp)
+		{
+			SetCapture(hWnd);
+			pApp->OnLeftButtonDown(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		}
+		return 0;
+
+	case WM_LBUTTONUP:
+		if (pApp)
+		{
+			ReleaseCapture();
+			pApp->OnLeftButtonUp(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		}
+		return 0;
+
 	case WM_MBUTTONDOWN:
 		if (pApp)
 		{
