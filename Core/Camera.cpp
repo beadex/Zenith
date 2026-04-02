@@ -44,6 +44,31 @@ void Camera::FrameBoundingSphere(const XMFLOAT3& center, float radius)
     UpdateClipPlanes();
 }
 
+void Camera::ExpandClipPlanesForSphere(const XMFLOAT3& center, float radius)
+{
+    if (radius <= 0.0f)
+    {
+        return;
+    }
+
+    const XMVECTOR eye = GetPosition();
+    const XMVECTOR target = XMLoadFloat3(&m_target);
+    const XMVECTOR forward = XMVector3Normalize(XMVectorSubtract(target, eye));
+    const XMVECTOR sphereCenter = XMLoadFloat3(&center);
+    const float centerDepth = XMVectorGetX(XMVector3Dot(XMVectorSubtract(sphereCenter, eye), forward));
+    const float sphereNear = centerDepth - radius;
+    const float sphereFar = centerDepth + radius;
+
+    if (sphereFar <= 0.0f)
+    {
+        return;
+    }
+
+    m_nearZ = max(0.01f, (std::min)(m_nearZ, sphereNear));
+    m_farZ = (std::max)(m_farZ, sphereFar);
+    m_farZ = (std::max)(m_farZ, m_nearZ + 1.0f);
+}
+
 void Camera::OnMiddleButtonDown(int x, int y)
 {
     m_mmbDown = true;

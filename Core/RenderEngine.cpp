@@ -146,8 +146,7 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 		m_modelOffset.z);
 	XMMATRIX world = translate;
 
-	const XMMATRIX view = m_camera.GetViewMatrix();
-	const XMMATRIX proj = m_camera.GetProjectionMatrix();
+ const XMMATRIX view = m_camera.GetViewMatrix();
   // Normals cannot always be transformed with the same matrix as positions.
 	// The inverse-transpose keeps them correct if non-uniform scaling is added.
 	const XMMATRIX normalMat = XMMatrixTranspose(XMMatrixInverse(nullptr, world));
@@ -237,15 +236,19 @@ void ZenithRenderEngine::OnUpdate(const Timer& timer)
 		nearPlane,
 		farPlane);
 	const XMMATRIX lightViewProjection = lightView * lightProjection;
-
-	XMStoreFloat4x4(&m_sceneDataCbData.model, XMMatrixTranspose(world));
-	XMStoreFloat4x4(&m_sceneDataCbData.view, XMMatrixTranspose(view));
-	XMStoreFloat4x4(&m_sceneDataCbData.projection, XMMatrixTranspose(proj));
-	XMStoreFloat4x4(&m_sceneDataCbData.normalMatrix, normalMat);
 	const float pointLightSceneScale = (std::max)(1.0f, shadowBoundsRadius);
 	m_pointLightGizmoScale = (std::min)(
 		PointLightGizmoScaleMax,
 		(std::max)(PointLightGizmoScaleMin, pointLightSceneScale * PointLightGizmoSceneScaleFactor));
+    if (m_pointLightEnabled)
+	{
+		m_camera.ExpandClipPlanesForSphere(m_pointLightPosition, m_pointLightGizmoScale);
+	}
+	const XMMATRIX proj = m_camera.GetProjectionMatrix();
+    XMStoreFloat4x4(&m_sceneDataCbData.model, XMMatrixTranspose(world));
+	XMStoreFloat4x4(&m_sceneDataCbData.view, XMMatrixTranspose(view));
+	XMStoreFloat4x4(&m_sceneDataCbData.projection, XMMatrixTranspose(proj));
+	XMStoreFloat4x4(&m_sceneDataCbData.normalMatrix, normalMat);
 	const XMMATRIX pointLightWorld =
 		XMMatrixScaling(m_pointLightGizmoScale, m_pointLightGizmoScale, m_pointLightGizmoScale) *
 		XMMatrixTranslation(m_pointLightPosition.x, m_pointLightPosition.y, m_pointLightPosition.z);

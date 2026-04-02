@@ -25,6 +25,7 @@ public:
 
     void SetLens(float fovY, float aspectRatio, float nearZ, float farZ);
     void FrameBoundingSphere(const XMFLOAT3& center, float radius);
+    void ExpandClipPlanesForSphere(const XMFLOAT3& center, float radius);
 
     // Input
     void OnMiddleButtonDown(int x, int y);

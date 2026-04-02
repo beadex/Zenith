@@ -45,7 +45,7 @@ private:
 	// Different tools disagree about whether the normal-map green channel points
 	// "up" or "down" in tangent space. Flipping this lets the renderer support
 	// the opposite convention without re-exporting the asset.
-	static constexpr bool FlipNormalMapGreenChannel = false;
+	static constexpr bool FlipNormalMapGreenChannel = true;
 
 	// The renderer now keeps four model PSOs instead of one so it can route each
 	// mesh by two independent material properties:

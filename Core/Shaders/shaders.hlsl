@@ -308,16 +308,18 @@ float3 SampleNormal(float2 uv, float3 normal, float3 tangent, float3 bitangent)
 
     t *= rsqrt(tangentLengthSq);
 
-    float3 b = bitangent - norm * dot(bitangent, norm);
-    float bitangentLengthSq = dot(b, b);
-    if (bitangentLengthSq < 1e-6f)
+    // Preserve tangent-space handedness from the imported basis, then rebuild
+    // the bitangent from `normal x tangent`. This is more stable than trusting
+    // the interpolated bitangent directly, especially on mirrored UV islands.
+    float bitangentHandedness = 1.0f;
+    float3 originalBitangent = bitangent - norm * dot(bitangent, norm);
+    float originalBitangentLengthSq = dot(originalBitangent, originalBitangent);
+    if (originalBitangentLengthSq >= 1e-6f)
     {
-        b = normalize(cross(norm, t));
+        bitangentHandedness = (dot(cross(norm, t), originalBitangent) < 0.0f) ? -1.0f : 1.0f;
     }
-    else
-    {
-        b *= rsqrt(bitangentLengthSq);
-    }
+
+    float3 b = normalize(cross(norm, t)) * bitangentHandedness;
 
     // Normal maps are stored in texture space as 0..1 values, so they must be
     // unpacked back into the signed -1..1 vector range before lighting.
